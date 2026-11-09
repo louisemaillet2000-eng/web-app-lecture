@@ -128,8 +128,32 @@ const GSTYLE = {
 const GENRE_DEF = 'Romantasy = fantasy avec une histoire d\'amour centrale. Fantasy = fantasy sans romance centrale. Romance = histoire d\'amour contemporaine ou autre, sans magie. Roman = littérature générale ou contemporaine. Policier & thriller = polar, enquête, suspense, thriller psychologique. Historique = roman historique. Science-fiction = SF, dystopie. Feel-good = roman doudou, cosy, réconfortant. Non-fiction = essai, biographie, développement personnel, documentaire.';
 const SPICY = new Set(['Romance','Romantasy']);
 const SPICE_BANDS = {'':'Spice : tous','doux':'Doux (0-1)','moyen':'Moyen (2-3)','epice':'Épicé (4-5)'};
-const GEMINI_MODELS = ['gemini-flash-latest','gemini-2.5-flash','gemini-flash-lite-latest','gemini-2.5-flash-lite'];
+const GEMINI_MODELS = ['gemini-2.5-flash','gemini-2.5-flash-lite','gemini-flash-latest','gemini-flash-lite-latest'];
+const AI_TIMEOUT = 20000, AI_BUDGET = 35000;
+let AI_BUSY_UNTIL = 0;
 const GB_GENRE = {'Romantasy':'romantasy','Fantasy':'subject:fantasy','Romance':'subject:romance','Roman':'subject:"literary fiction"','Policier & thriller':'subject:thriller','Historique':'subject:"historical fiction"','Science-fiction':'subject:"science fiction"','Feel-good':'"feel good" roman','Non-fiction':'subject:biography'};
+const OL_GENRE_Q = {
+  'Romantasy':['subject:fantasy AND subject:romance','romantasy'],
+  'Fantasy':['subject:fantasy'],
+  'Romance':['subject:"love stories"','subject:"romance fiction"'],
+  'Roman':['subject:"literary fiction"','subject:"fiction, general"'],
+  'Policier & thriller':['subject:thriller','subject:"detective and mystery stories"'],
+  'Historique':['subject:"historical fiction"'],
+  'Science-fiction':['subject:"science fiction"'],
+  'Feel-good':['subject:"feel good"','subject:"humorous fiction" AND subject:"love stories"'],
+  'Non-fiction':['subject:biography','subject:"self-help"']
+};
+const GB_GENRE_Q = {
+  'Romantasy':['romantasy','"fantasy romance"','fae romance dragons'],
+  'Fantasy':['subject:fantasy bestseller','"epic fantasy"','subject:"fantasy fiction"'],
+  'Romance':['subject:romance bestseller','"romantic comedy" novel','subject:"contemporary romance"'],
+  'Roman':['subject:"literary fiction"','roman prix goncourt','subject:fiction bestseller'],
+  'Policier & thriller':['subject:thriller','polar roman','"psychological thriller"'],
+  'Historique':['subject:"historical fiction"','roman historique'],
+  'Science-fiction':['subject:"science fiction"','dystopian novel','roman science-fiction'],
+  'Feel-good':['roman feel good','"cozy" novel','roman feel-good bestseller'],
+  'Non-fiction':['subject:biography bestseller','essai bestseller','subject:"self-help"']
+};
 const STORE = 'ma-liste-lecture-v1';
 const COVER_COLORS = ['#7A2E1F','#1F3A5F','#3B3B3B','#5C1A1A','#2D4A3E','#4A5568','#0F5257','#8C2F39','#5B1E2D','#7A5C2E'];
 const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
@@ -164,7 +188,7 @@ let S = loadState();
 function save(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){ toast("Impossible d'enregistrer sur cet appareil."); } }
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 
-const UI = { tab:'lib', seg:'reading', libGenre:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
+const UI = { tab:'lib', seg:'reading', libGenre:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
 let SHEET = null;
 let LAST_INPUT = null;   // {kind:'detail'|'add'|'import'|'settings', ...}
 
@@ -219,21 +243,66 @@ function gbMap(it){
   const isbn = (ids.find(i=>i.type==='ISBN_13') || ids.find(i=>i.type==='ISBN_10') || {}).identifier || '';
   let thumb = (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || '';
   thumb = thumb.replace(/^http:/,'https:').replace('&edge=curl','');
-  return { gid:it.id, title:v.title||'', author:(v.authors||[]).join(', '), desc:cleanDesc(v.description), categories:v.categories||[], isbn, thumb, pages:v.pageCount||null, year:(v.publishedDate||'').slice(0,4), lang:v.language||'' };
+  return { gid:it.id, gRating:v.averageRating||null, gCount:v.ratingsCount||0, title:v.title||'', author:(v.authors||[]).join(', '), desc:cleanDesc(v.description), categories:v.categories||[], isbn, thumb, pages:v.pageCount||null, year:(v.publishedDate||'').slice(0,4), lang:v.language||'' };
+}
+const GB_CACHE = {};
+let GB_BLOCKED_UNTIL = 0;
+async function fetchJSON(url, ms){
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), ms || 15000);
+  try{ const r = await fetch(url, {signal:ctrl.signal}); if(!r.ok){ const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; } return await r.json(); }
+  catch(e){ if(e.name === 'AbortError'){ const x = new Error('timeout'); x.status = 0; throw x; } throw e; }
+  finally{ clearTimeout(timer); }
 }
 async function gbSearch(q, max){
   const url = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(q) + '&maxResults=' + (max||20) + '&printType=books';
-  const r = await fetch(url);
-  if(!r.ok) throw new Error('La recherche Google Books ne répond pas (' + r.status + ').');
-  const j = await r.json();
-  return (j.items || []).map(gbMap).filter(x => x.title);
+  if(GB_CACHE[url]) return GB_CACHE[url];
+  if(Date.now() < GB_BLOCKED_UNTIL) throw new Error('Google Books limité');
+  try{
+    const j = await fetchJSON(url, 12000);
+    return GB_CACHE[url] = (j.items || []).map(gbMap).filter(x => x.title);
+  }catch(e){ if(e.status === 429) GB_BLOCKED_UNTIL = Date.now() + 10*60000; throw e; }
+}
+/* ---- Open Library (gratuit, sans limite stricte) ---- */
+const OL_FIELDS = 'key,title,author_name,cover_i,first_publish_year,number_of_pages_median,subject,ratings_average,ratings_count,readinglog_count';
+const OL_CACHE = {};
+function olMap(d){
+  return { olKey:d.key||'', title:d.title||'', author:(d.author_name||[]).slice(0,2).join(', '), desc:'', categories:(d.subject||[]).slice(0,12),
+    isbn:'', thumb: d.cover_i ? 'https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg' : '', pages:d.number_of_pages_median||null,
+    year: d.first_publish_year ? String(d.first_publish_year) : '', gRating: d.ratings_average ? Math.round(d.ratings_average*10)/10 : null,
+    gCount: d.ratings_count||0, reads: d.readinglog_count||0 };
+}
+async function olSearch(params){
+  const p = new URLSearchParams(Object.assign({fields:OL_FIELDS, limit:20}, params));
+  const url = 'https://openlibrary.org/search.json?' + p.toString();
+  if(OL_CACHE[url]) return OL_CACHE[url];
+  const j = await fetchJSON(url, 15000);
+  return OL_CACHE[url] = (j.docs || []).map(olMap).filter(x => x.title);
+}
+async function olDesc(key){
+  if(!key) return '';
+  try{ const j = await fetchJSON('https://openlibrary.org' + key + '.json', 8000); const d = j.description; return cleanDesc(typeof d === 'string' ? d : (d && d.value) || '').replace(/\(\[source\]\[\d+\]\)|\[\d+\]:.*$/gs,'').trim(); }
+  catch(e){ return ''; }
+}
+async function bookSearch(q, max){
+  let res = [], err = null;
+  try{ res = await olSearch({q, limit:max||20}); }catch(e){ err = e; }
+  if(res.length < 3){ try{ const g = await gbSearch(q, max||20); res = res.concat(g); }catch(e){ err = err || e; } }
+  if(!res.length && err) throw new Error('La recherche de livres ne répond pas pour le moment, réessaie dans un instant.');
+  return res;
 }
 async function gbFind(title, author){
   let res = [];
-  try{ res = await gbSearch('intitle:"' + title + '"' + (author ? ' inauthor:"' + author.split(',')[0] + '"' : ''), 6); }catch(e){}
-  if(!res.length){ try{ res = await gbSearch(title + ' ' + (author||''), 6); }catch(e){} }
+  try{ res = await olSearch(Object.assign({title, limit:8, sort:'readinglog'}, author ? {author:author.split(',')[0]} : {})); }catch(e){}
   res = res.filter(r => similar(title, r.title));
-  return res.find(r => r.thumb && r.desc) || res.find(r => r.thumb) || res[0] || null;
+  if(!res.length){ try{ res = await olSearch({q:title + ' ' + (author||''), limit:8}); res = res.filter(r => similar(title, r.title)); }catch(e){} }
+  if(!res.find(r => r.thumb)){
+    let g = [];
+    try{ g = await gbSearch('intitle:"' + title + '"' + (author ? ' inauthor:"' + author.split(',')[0] + '"' : ''), 6); }catch(e){}
+    g = g.filter(r => similar(title, r.title));
+    const gb = g.find(r => r.thumb && r.desc) || g.find(r => r.thumb);
+    if(gb) return res[0] ? Object.assign(res[0], {thumb:gb.thumb, desc:gb.desc, isbn:gb.isbn}) : gb;
+  }
+  return res.find(r => r.thumb) || res[0] || null;
 }
 function baseCand(title, author){ return {title, author:author||'', desc:'', categories:[], isbn:'', thumb:'', pages:null, year:''}; }
 async function lookup(title, author){
@@ -249,15 +318,24 @@ async function ai({system, text, image, max_tokens}){
   const parts = [];
   if(image) parts.push({inline_data:{mime_type:image.type, data:image.data}});
   parts.push({text});
-  const body = JSON.stringify({systemInstruction:{parts:[{text:system}]}, contents:[{role:'user', parts}], generationConfig:{responseMimeType:'application/json', maxOutputTokens:Math.max(8192, max_tokens||0), temperature:0.4}});
-  const models = [...new Set([S.settings.model].filter(Boolean).concat(GEMINI_MODELS))];
+  const bodyFor = m => JSON.stringify({systemInstruction:{parts:[{text:system}]}, contents:[{role:'user', parts}], generationConfig:Object.assign({responseMimeType:'application/json', maxOutputTokens:Math.max(8192, max_tokens||0), temperature:0.4}, /2\.5/.test(m) ? {thinkingConfig:{thinkingBudget:0}} : {})});
+  const models = [...new Set([S.settings.model].filter(m => GEMINI_MODELS.includes(m)).concat(GEMINI_MODELS))];
+  const t0 = Date.now();
+  if(Date.now() < AI_BUSY_UNTIL){ const e = new Error('L\'IA gratuite de Google est surchargée en ce moment, réessaie dans quelques minutes.'); e.busy = true; throw e; }
   let lastErr = null;
   const sleep = ms => new Promise(res => setTimeout(res, ms));
   for(const m of models){
+   if(Date.now() - t0 > AI_BUDGET) break;
    for(let attempt = 0; attempt < 2; attempt++){
     let r;
-    try{ r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', {method:'POST', headers:{'content-type':'application/json','x-goog-api-key':key}, body}); }
-    catch(e){ throw new Error('Pas de connexion à l\'IA. Vérifie ton réseau.'); }
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT);
+    try{ r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', {method:'POST', headers:{'content-type':'application/json','x-goog-api-key':key}, body:bodyFor(m), signal:ctrl.signal}); }
+    catch(e){
+      clearTimeout(timer);
+      if(e.name === 'AbortError'){ lastErr = new Error('L\'IA gratuite de Google met trop de temps à répondre, réessaie dans quelques minutes.'); lastErr.busy = true; break; }
+      throw new Error('Pas de connexion à l\'IA. Vérifie ton réseau.');
+    }
+    clearTimeout(timer);
     if(r.ok){
       const j = await r.json();
       if(S.settings.model !== m || S.settings.aiStatus){ S.settings.model = m; S.settings.aiStatus = ''; save(); }
@@ -267,10 +345,10 @@ async function ai({system, text, image, max_tokens}){
       return t;
     }
     let msg = ''; try{ msg = (await r.json()).error.message || ''; }catch(e){}
-    if(r.status === 404){ lastErr = new Error('Modèle Gemini introuvable.'); break; }
+    if(r.status === 404 || (r.status === 400 && /thinking/i.test(msg))){ lastErr = new Error('Modèle Gemini indisponible.'); break; }
     if(r.status === 503 || r.status === 500 || r.status === 502 || r.status === 504){
       lastErr = new Error('L\'IA gratuite de Google est surchargée en ce moment, réessaie dans quelques minutes.'); lastErr.busy = true;
-      if(attempt === 0){ await sleep(1500); continue; } break;
+      if(attempt === 0 && Date.now() - t0 < AI_BUDGET){ await sleep(1500); continue; } break;
     }
     if(r.status === 429){ lastErr = new Error('Limite gratuite de Gemini atteinte pour le moment, réessaie un peu plus tard.'); lastErr.busy = true; break; }
     if(/location is not supported|not available in your country|free tier is not available|enable billing/i.test(msg)){
@@ -281,6 +359,7 @@ async function ai({system, text, image, max_tokens}){
     throw new Error('Erreur de l\'IA (' + r.status + ') ' + msg);
    }
   }
+  if(lastErr && lastErr.busy) AI_BUSY_UNTIL = Date.now() + 90000;
   throw lastErr || new Error('IA indisponible.');
 }
 function parseJSON(t){
@@ -310,7 +389,8 @@ async function enrichBooks(cands){
       genre: GENRES.includes(e.genre) ? e.genre : (c.genre || guessGenre(c)),
       tags: Array.isArray(e.tags) ? e.tags.filter(Boolean).slice(0,3) : [],
       summary: e.summary || c.desc.slice(0,600),
-      spiceEst: typeof e.spice === 'number' ? e.spice : (c.spiceEst ?? null)
+      spiceEst: typeof e.spice === 'number' ? e.spice : (c.spiceEst ?? null),
+      enriched: true
     });
   });
 }
@@ -318,11 +398,12 @@ function makeBook(c, source, status){
   return { id:uid(), title:c.title, author:c.author||'', series:c.series||'', tome:c.tome||null, seriesTotal:c.seriesTotal||null,
     genre:c.genre||guessGenre(c), tags:c.tags||[], summary:c.summary||(c.desc||'').slice(0,600), spiceEst:c.spiceEst ?? null, spice:null, rating:0,
     status:status||'toread', isbn:c.isbn||'', thumb:c.thumb||'', gid:c.gid||'', pages:c.pages||null, year:c.year||'',
-    source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
+    enriched:!!c.enriched, source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
 }
 async function addCandidates(cands, source){
   cands = cands.filter(c => !findOwned(c.title));
   if(!cands.length){ toast('Déjà dans ta liste.'); return []; }
+  await Promise.all(cands.map(async c => { if(!c.desc && c.olKey) c.desc = await olDesc(c.olKey); }));
   let rich = cands;
   if(hasAI()){
     try{ rich = await enrichBooks(cands); }catch(e){ toast('Ajouté sans les infos de l\'IA : ' + e.message); }
@@ -355,7 +436,9 @@ function renderTabs(){
 function render(){
   renderTabs();
   const v = $('#view');
+  const act = document.activeElement, keep = act && (act.id === 'q' || act.id === 'ask') ? {id:act.id, val:act.value, pos:act.selectionStart} : null;
   v.innerHTML = UI.tab==='lib' ? viewLib() : UI.tab==='search' ? viewSearch() : UI.tab==='me' ? viewMe() : viewStats();
+  if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.val; el.focus(); try{ el.setSelectionRange(keep.pos, keep.pos); }catch(e){} } }
 }
 
 function viewLib(){
@@ -401,35 +484,60 @@ function viewLib(){
 function viewSearch(){
   const g = UI.sGenre, spicy = SPICY.has(g);
   let body = '';
-  if(UI.sLoading) body = `<div class="loading"><div class="spinner"></div>${UI.q || !hasAI() ? 'Recherche en cours…' : 'L\'IA prépare une sélection…'}</div>`;
-  else if(UI.sError) body = `<div class="err">${esc(UI.sError)}</div>`;
-  else if(UI.sResults){
-    let res = UI.sResults;
-    if(!UI.q && UI.sSpice) res = res.filter(r => r.spiceEst == null || inBand(r.spiceEst, UI.sSpice));
-    body = res.length ? `<div>${res.map((r,i) => resultRow(r, 'res', i)).join('')}</div>` : `<div class="empty">Aucun résultat.</div>`;
-  } else body = `<div class="empty">Cherche un titre, un auteur ou une série,<br>ou choisis un genre pour découvrir une sélection.</div>`;
+  if(UI.q){
+    if(UI.sLoading) body = `<div class="loading"><div class="spinner"></div>Recherche en cours…</div>`;
+    else if(UI.sError) body = `<div class="err">${esc(UI.sError)}</div>`;
+    else if(UI.sResults) body = UI.sResults.length ? `<div>${UI.sResults.map((r,i) => resultRow(r, 'res', i)).join('')}</div>` : `<div class="empty">Aucun résultat.</div>`;
+  } else if(g){
+    body = aiBox(g, spicy) + popBox(g);
+  } else body = `<div class="empty">Cherche un titre, un auteur ou une série,<br>ou choisis un genre pour découvrir des livres.</div>`;
   return `
   <h1>Recherche</h1>
-  <form class="field" data-form="search" role="search">${I.search}<label class="sr" for="q">Rechercher un titre ou un auteur</label><input id="q" type="search" enterkeyhint="search" placeholder="Titre, auteur, série…" value="${esc(UI.q)}" autocomplete="off"></form>
+  <form class="field" data-form="search" role="search">${I.search}<label class="sr" for="q">Rechercher un titre ou un auteur</label><input id="q" type="search" enterkeyhint="search" placeholder="Titre, auteur, série…" value="${esc(UI.q)}" autocomplete="off">${UI.q ? `<button type="button" class="icon-btn" style="width:36px;height:36px;background:transparent" data-a="clearQ" aria-label="Effacer la recherche">${I.close}</button>` : ''}</form>
   <div class="panel">
     <span class="label">Genre</span>
     <div class="chips"><button class="chip ${!g?'on':''}" data-a="sGenre" data-v="">Tous</button>${GENRES.map(x => `<button class="chip ${g===x?'on':''}" data-a="sGenre" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
   </div>
-  ${(spicy || (!UI.q && g)) ? `<div class="row between">
-     <span class="small">${UI.q ? '' : g ? 'Sélection ' + esc(g) : ''}</span>
-     <div class="row" style="gap:8px">${spicy && !UI.q ? `<label class="sr" for="spice">Niveau de spice</label><select id="spice" class="mini" data-change="sSpice">${Object.entries(SPICE_BANDS).map(([k,l]) => `<option value="${k}" ${UI.sSpice===k?'selected':''}>${l}</option>`).join('')}</select>` : ''}
-     ${!UI.q && g ? `<button class="icon-btn" style="width:36px;height:36px" data-a="refreshCurated" aria-label="Nouvelle sélection">${I.refresh}</button>` : ''}</div>
-   </div>` : ''}
   ${body}`;
 }
+function aiBox(g, spicy){
+  let inner;
+  if(!hasAI()) inner = `<p class="small" style="font-size:13px;line-height:1.45">Ajoute ta clé Gemini gratuite pour avoir des recommandations personnalisées ici.</p><button class="btn light" style="height:38px;align-self:flex-start" data-a="openSettings">Réglages</button>`;
+  else if(UI.aiLoading) inner = `<div class="row small" style="font-size:13px"><div class="spinner" style="width:18px;height:18px"></div>L'IA choisit pour toi… la liste ci-dessous est déjà prête.</div>`;
+  else if(UI.aiError) inner = `<p class="small" style="font-size:13px;line-height:1.45">${esc(UI.aiError)}</p><button class="btn light" style="height:38px;align-self:flex-start" data-a="refreshAI">${I.refresh} Réessayer</button>`;
+  else if(UI.aiPicks && UI.aiPicks.length) inner = `<div>${UI.aiPicks.map((r,i) => resultRow(r, 'aip', i, true)).join('')}</div>`;
+  else inner = `<p class="small" style="font-size:13px">Pas de suggestion pour l'instant.</p>`;
+  return `<div class="box" style="gap:10px;border-color:#D9E2FF;background:#F7F9FF">
+    <div class="row between"><span class="row" style="gap:8px;font-size:15px;font-weight:700;color:var(--accent)">${I.tabMe} Recommandation IA</span>
+      <div class="row" style="gap:6px">${spicy && hasAI() ? `<label class="sr" for="spice">Niveau de spice</label><select id="spice" class="mini" style="background:#fff" data-change="sSpice">${Object.entries(SPICE_BANDS).map(([k,l]) => `<option value="${k}" ${UI.sSpice===k?'selected':''}>${l}</option>`).join('')}</select>` : ''}
+      ${hasAI() && !UI.aiLoading ? `<button class="icon-btn" style="width:36px;height:36px;background:#fff" data-a="refreshAI" aria-label="Autres recommandations">${I.refresh}</button>` : ''}</div></div>
+    ${inner}</div>`;
+}
+function popBox(g){
+  let list = '';
+  if(UI.popLoading) list = `<div class="loading"><div class="spinner"></div>Chargement des livres populaires…</div>`;
+  else if(UI.popError) list = `<div class="err">${esc(UI.popError)}</div><button class="btn light" data-a="sGenre" data-v="${esc(g)}">${I.refresh} Réessayer</button>`;
+  else if(UI.pop){
+    const items = UI.pop.map((r,i) => ({r,i})).filter(x => !UI.hideRead || !isRead(x.r.title));
+    list = items.length ? `<div>${items.map(x => resultRow(x.r, 'pop', x.i)).join('')}</div>` : `<div class="empty">Tu as déjà tout lu ici !</div>`;
+  }
+  return `<div class="col" style="gap:8px">
+    <div class="row between" style="flex-wrap:wrap;gap:8px"><h2>Populaires en ${esc(g)}</h2>
+      <button class="chip sm ${UI.hideRead?'on':''}" data-a="toggleRead" aria-pressed="${UI.hideRead}">${UI.hideRead ? I.check + ' ' : ''}Pas encore lus</button></div>
+    <p class="small">Les plus lus d'abord (lecteurs et avis Open Library).</p>
+    ${list}</div>`;
+}
+function isRead(title){ const b = findOwned(title); return !!(b && b.status === 'read'); }
 function inBand(v, band){ return band==='doux' ? v <= 1 : band==='moyen' ? (v >= 2 && v <= 3) : band==='epice' ? v >= 4 : true; }
-function resultRow(r, list, i){
+function resultRow(r, list, i, showWhy){
   const owned = findOwned(r.title);
-  return `<div class="litem">
+  return `<div class="litem"${showWhy ? ' style="align-items:flex-start"' : ''}>
     <button data-a="openCand" data-v="${list}:${i}" style="display:flex;gap:14px;align-items:center;flex:1;min-width:0;border:none;background:none;padding:0;text-align:left;color:var(--ink)">
       ${coverHTML(r,'width:56px;height:84px')}
       <div class="meta"><span class="ttl">${esc(r.title)}</span><span class="aut">${esc(r.author)}${r.series ? ' · ' + esc(r.series) + (r.tome ? ' T' + r.tome : '') : r.year ? ' · ' + esc(r.year) : ''}</span>
-      ${r.spiceEst != null && SPICY.has(r.genre || UI.sGenre) ? `<span class="row small" style="gap:4px">${pepSVG(true,14)} ${r.spiceEst}/5 · estimé par l'IA</span>` : ''}</div>
+      ${(r.gRating || r.reads) ? `<span class="small">${[r.gRating ? '★ ' + String(r.gRating).replace('.', ',') : '', r.reads ? r.reads.toLocaleString('fr-FR') + ' lecteurs' : (r.gCount ? r.gCount + ' avis' : '')].filter(Boolean).join(' · ')}</span>` : ''}
+      ${r.spiceEst != null && SPICY.has(r.genre || UI.sGenre) ? `<span class="row small" style="gap:4px">${pepSVG(true,14)} ${r.spiceEst}/5 · estimé par l'IA</span>` : ''}
+      ${showWhy && r.why ? `<span style="font-size:13px;line-height:1.4;color:var(--ink2)">${esc(r.why)}</span>` : ''}</div>
     </button>
     ${owned ? `<span class="small" style="flex-shrink:0">Dans ta liste</span>` : `<button class="icon-btn white" style="border:1px solid #DCDCE2" data-a="addCand" data-v="${list}:${i}" aria-label="Ajouter ${esc(r.title)} à ma liste">${I.plus}</button>`}
   </div>`;
@@ -570,6 +678,7 @@ function sheetDetail(){
           ${src.url ? I.chev + '</a>' : '</div>'}
         ${b.finishedAt ? `<p class="small">Terminé le ${fmtDate(b.finishedAt)}</p>` : b.startedAt ? `<p class="small">Commencé le ${fmtDate(b.startedAt)}</p>` : ''}
       </div>
+      ${!b.enriched && hasAI() ? `<button class="btn line block" data-a="enrichOne" ${SHEET.busy?'disabled':''}>${SHEET.busy ? 'L\'IA complète la fiche…' : I.tabMe + ' Compléter avec l\'IA (résumé, genre, spice)'}</button>` : ''}
       <div class="col" style="gap:8px"><label class="label" for="genreSel">Genre</label>
         <select id="genreSel" class="inp" data-change="genre">${GENRES.map(g => `<option ${g===b.genre?'selected':''}>${esc(g)}</option>`).join('')}</select></div>
       ${SHEET.confirmDel ? `<div class="panel"><p style="font-size:14px">Supprimer « ${esc(b.title)} » de ta liste ?</p><div class="row"><button class="btn light" style="flex:1" data-a="cancelDel">Annuler</button><button class="btn" style="flex:1;background:#B42318" data-a="doDel">Supprimer</button></div></div>`
@@ -643,7 +752,7 @@ function sheetSettings(){
 /* ============ Actions ============ */
 function candFrom(ref){
   const [list, i] = ref.split(':');
-  const arr = list==='res' ? UI.sResults : list==='rec' ? S.recs : list==='add' ? (SHEET && SHEET.results) : null;
+  const arr = list==='res' ? UI.sResults : list==='pop' ? UI.pop : list==='aip' ? UI.aiPicks : list==='rec' ? S.recs : list==='add' ? (SHEET && SHEET.results) : null;
   return arr ? arr[Number(i)] : null;
 }
 async function addOne(cand, sourceType){
@@ -657,7 +766,7 @@ const A = {
   seg(v){ UI.seg = v; render(); },
   libGenre(v){ UI.libGenre = v; render(); },
   open(v){ SHEET = {kind:'detail', id:v}; renderSheet(); },
-  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec'); SHEET = {kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}; renderSheet(); },
+  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip'); SHEET = {kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}; renderSheet(); },
   close(){ closeSheet(); },
   async addCurrent(){
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
@@ -668,7 +777,7 @@ const A = {
   async addCand(v, el){
     const c = candFrom(v); if(!c) return;
     el.disabled = true; el.innerHTML = '<div class="spinner"></div>';
-    const type = v.startsWith('rec') ? 'ia' : 'recherche';
+    const type = (v.startsWith('rec') || v.startsWith('aip')) ? 'ia' : 'recherche';
     await addOne(c, type);
     if(v.startsWith('rec')){ S.recs.splice(Number(v.split(':')[1]), 1); save(); }
     if(SHEET && SHEET.kind === 'add') renderSheet();
@@ -691,8 +800,10 @@ const A = {
   openAdd(){ SHEET = {kind:'add', q:'', results:null}; renderSheet(); },
   openSettings(){ SHEET = {kind:'settings', nokey: !S.settings.apiKey}; renderSheet(); },
   pickShot(){ const f = $('#fileShot'); f.value = ''; f.click(); },
-  sGenre(v){ UI.sGenre = v; UI.sSpice = ''; if(UI.q) runSearch(); else if(v) loadCurated(false); else { UI.sResults = null; UI.sError=''; render(); } },
-  refreshCurated(){ loadCurated(true); },
+  sGenre(v){ if(v !== UI.sGenre) UI.sSpice = ''; UI.sGenre = v; if(UI.q) runSearch(); else if(v) loadGenre(); else render(); },
+  refreshAI(){ loadAIPicks(true); },
+  toggleRead(){ UI.hideRead = !UI.hideRead; render(); },
+  clearQ(){ UI.q = ''; UI.sResults = null; if(UI.sGenre) loadGenre(); else render(); },
   recommend(v){ recommend(v || ''); },
   toggleImp(v){ const x = SHEET.items[Number(v)]; if(x && !x.owned){ x.checked = !x.checked; renderSheet(); } },
   async confirmImp(){
@@ -718,6 +829,16 @@ const A = {
     catch(e){ toast(e.message); }
     renderSheet();
   },
+  async enrichOne(){
+    const b = currentBook(); if(!b || SHEET.busy) return;
+    SHEET.busy = true; renderSheet();
+    try{
+      const [e] = await enrichBooks([Object.assign({desc:'', categories:[]}, b, {desc:b.summary||''})]);
+      Object.assign(b, {title:e.title, author:e.author, series:e.series, tome:e.tome, seriesTotal:e.seriesTotal, genre:e.genre, tags:e.tags, summary:e.summary, spiceEst:e.spiceEst, enriched:true});
+      save(); toast('Fiche complétée');
+    }catch(err){ toast(err.message); }
+    if(SHEET) SHEET.busy = false; renderSheet(); render();
+  },
   retryImport(){ if(LAST_INPUT) startImport(LAST_INPUT); },
   importData(){ const f = $('#fileBackup'); f.value = ''; f.click(); },
   async copyLink(){ try{ await navigator.clipboard.writeText(location.origin + location.pathname + '?import='); toast('Adresse copiée'); }catch(e){ toast('Copie impossible, sélectionne l\'adresse à la main.'); } }
@@ -730,14 +851,14 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]'); if(!el) return;
   const k = el.dataset.change;
-  if(k === 'sSpice'){ UI.sSpice = el.value; if(!UI.q && UI.sGenre) loadCurated(false); else render(); }
+  if(k === 'sSpice'){ UI.sSpice = el.value; loadAIPicks(false); }
   if(k === 'year'){ UI.year = Number(el.value); render(); }
   if(k === 'genre'){ const b = currentBook(); if(b){ b.genre = el.value; save(); renderSheet(); } }
 });
 document.addEventListener('submit', e => {
   const f = e.target.closest('[data-form]'); if(!f) return; e.preventDefault();
   const k = f.dataset.form;
-  if(k === 'search'){ UI.q = $('#q').value.trim(); $('#q').blur(); if(UI.q) runSearch(); else if(UI.sGenre) loadCurated(false); else { UI.sResults = null; render(); } }
+  if(k === 'search'){ UI.q = $('#q').value.trim(); $('#q').blur(); if(UI.q) runSearch(); else if(UI.sGenre) loadGenre(); else { UI.sResults = null; render(); } }
   if(k === 'ask'){ const v = $('#ask').value.trim(); if(v) recommend(v); }
   if(k === 'addsearch'){ addSearch($('#aq').value.trim()); }
   if(k === 'manual'){ manualAdd($('#mt').value.trim(), $('#ma').value.trim()); }
@@ -771,41 +892,64 @@ async function runSearch(){
   UI.sLoading = true; UI.sError = ''; UI.sResults = null; render();
   try{
     const hint = {'Fantasy':' subject:fantasy','Romance':' subject:romance','Romantasy':' romantasy','Policier & thriller':' subject:thriller','Historique':' subject:historical','Science-fiction':' subject:"science fiction"'}[UI.sGenre] || '';
-    let res = await gbSearch(UI.q + hint, 30);
-    if(!res.length && hint) res = await gbSearch(UI.q, 30);
+    let res = await bookSearch(UI.q, 30);
     const seen = new Set();
     UI.sResults = res.filter(r => { const k = norm(r.title) + '|' + norm(r.author); if(seen.has(k)) return false; seen.add(k); return true; });
   }catch(e){ UI.sError = e.message; }
   UI.sLoading = false; render();
 }
-async function loadCurated(force){
-  const g = UI.sGenre, band = SPICY.has(g) ? UI.sSpice : '';
+async function gbGenreList(g){
+  const qs = OL_GENRE_Q[g] || [GB_GENRE[g] || g];
+  let lists = await Promise.all(qs.map(q => olSearch({q, sort:'readinglog', limit:40}).catch(() => [])));
+  if(lists.flat().filter(r => r.thumb).length < 10){
+    const more = await Promise.all((GB_GENRE_Q[g] || []).slice(0,2).map(q => gbSearch(q, 40).catch(() => [])));
+    lists = lists.concat(more);
+  }
+  const seen = new Set(); const out = [];
+  lists.flat().forEach(r => {
+    const k = norm(r.title) + '|' + norm((r.author||'').split(',')[0]);
+    if(!r.thumb || !r.author || seen.has(k) || [...seen].some(x => x.split('|')[0] === norm(r.title))) return;
+    seen.add(k); out.push(Object.assign(r, {genre:g}));
+  });
+  if(!out.length && lists.every(l => !l.length)) throw new Error('La recherche de livres ne répond pas pour le moment, réessaie.');
+  // les plus lus d'abord (lecteurs Open Library, sinon avis × note), puis l'ordre de pertinence
+  return out.map((r,i) => ({r, score:(r.reads||0) + (r.gCount||0) * (r.gRating||3), i})).sort((a,b) => b.score - a.score || a.i - b.i).map(x => x.r).slice(0, 40);
+}
+async function loadGenre(){
+  const g = UI.sGenre; if(!g) return;
+  loadAIPicks(false);
+  if(UI.popCache[g]){ UI.pop = UI.popCache[g]; UI.popError = ''; UI.popLoading = false; render(); return; }
+  UI.pop = null; UI.popError = ''; UI.popLoading = true; render();
+  try{ const list = await gbGenreList(g); UI.popCache[g] = list; if(UI.sGenre === g) UI.pop = list; }
+  catch(e){ if(UI.sGenre === g) UI.popError = e.message; }
+  if(UI.sGenre === g){ UI.popLoading = false; render(); }
+}
+let AI_REQ = 0;
+async function loadAIPicks(force){
+  const g = UI.sGenre; if(!g) return;
+  UI.aiError = '';
+  if(!hasAI()){ UI.aiPicks = null; UI.aiLoading = false; render(); return; }
+  const band = SPICY.has(g) ? UI.sSpice : '';
   const key = g + '|' + band;
   const c = S.curated[key];
-  if(!force && c && Date.now() - c.at < 7*86400000){ UI.sResults = c.list; UI.sError=''; render(); return; }
-  UI.sLoading = true; UI.sError = ''; UI.sResults = null; render();
-  if(!hasAI()){
-    try{
-      const res = await gbSearch(GB_GENRE[g] || g, 30);
-      const seen = new Set();
-      UI.sResults = res.filter(r => { const k = norm(r.title); if(seen.has(k) || !r.thumb) return false; seen.add(k); return true; }).map(r => Object.assign(r, {genre:g}));
-    }catch(e){ UI.sError = e.message; }
-    UI.sLoading = false; render(); return;
-  }
+  if(!force && c && Date.now() - c.at < 86400000){ UI.aiPicks = c.list.filter(r => !findOwned(r.title)); UI.aiLoading = false; render(); if(UI.aiPicks.length) return; }
+  const req = ++AI_REQ;
+  UI.aiPicks = null; UI.aiLoading = true; render();
   try{
-    const prev = force && c ? c.list.map(x => x.title) : [];
-    const system = 'Tu es une libraire passionnée. Définitions des genres : ' + GENRE_DEF + ' Réponds uniquement en JSON : {"books":[{"title":"","author":"","series":null,"tome":null,"spice":null}]}. "spice" = intensité des scènes de sexe de 0 à 5 pour Romance et Romantasy, sinon null. Pour une série, donne le tome 1.';
-    const text = 'Propose 15 livres du genre « ' + g + ' » très appréciés des lectrices et lecteurs, en mélangeant incontournables et parutions récentes (jusqu\'à aujourd\'hui), disponibles en français ou en anglais. Titre français s\'il existe.' +
+    const prev = c ? c.list.map(x => x.title) : [];
+    const lib = S.books.filter(b => b.rating > 0).map(b => b.title + ' (' + b.rating + '/5' + (b.spice != null ? ', spice ' + b.spice : '') + ')');
+    const system = 'Tu es la libraire personnelle d\'une lectrice. Définitions des genres : ' + GENRE_DEF + ' Réponds uniquement en JSON : {"books":[{"title":"","author":"","series":null,"tome":null,"spice":null,"why":""}]}. "spice" = intensité des scènes de sexe de 0 à 5 pour Romance et Romantasy, sinon null. Pour une série, donne le tome 1. "why" : une phrase courte en français qui explique ce choix, en citant une de ses lectures si possible. Seulement des livres publiés, titre français s\'il existe.';
+    const text = 'Propose 3 livres du genre « ' + g + ' » qu\'elle a de grandes chances d\'adorer.' +
       (band ? ' Niveau de spice : ' + SPICE_BANDS[band] + '.' : '') +
-      (prev.length ? ' Évite ceux-ci : ' + prev.join(' ; ') + '.' : '') +
-      (S.books.length ? ' Évite aussi ceux qu\'elle a déjà : ' + S.books.map(b => b.title).slice(0,150).join(' ; ') + '.' : '');
+      (lib.length ? ' Ses livres notés : ' + lib.slice(0,80).join(' ; ') + '.' : ' Elle n\'a encore rien noté : choisis des valeurs sûres très appréciées.') +
+      ' Ne propose aucun de ceux-ci : ' + S.books.map(b => b.title).concat(S.dislikes, force ? prev : []).slice(0,200).join(' ; ') + '.';
     const out = await ai({system, text});
-    const list = (parseJSON(out).books || []).filter(b => b && b.title).slice(0,15);
-    const rich = await Promise.all(list.map(async b => Object.assign(await lookup(b.title, b.author), {series:b.series||'', tome:Number(b.tome)||null, genre:g, spiceEst: typeof b.spice==='number' ? b.spice : null})));
+    const list = (parseJSON(out).books || []).filter(b => b && b.title && !findOwned(b.title)).slice(0,3);
+    const rich = await Promise.all(list.map(async b => Object.assign(await lookup(b.title, b.author), {series:b.series||'', tome:Number(b.tome)||null, genre:g, why:b.why||'', spiceEst: typeof b.spice==='number' ? b.spice : null})));
     S.curated[key] = {at:Date.now(), list:rich}; save();
-    if(UI.sGenre === g) UI.sResults = rich;
-  }catch(e){ UI.sError = e.message; if(e.blocked){ UI.sLoading = false; return loadCurated(force); } }
-  UI.sLoading = false; render();
+    if(req === AI_REQ) UI.aiPicks = rich;
+  }catch(e){ if(req === AI_REQ) UI.aiError = e.blocked ? 'Gemini gratuit n\'est pas disponible depuis ton pays.' : e.message; }
+  if(req === AI_REQ){ UI.aiLoading = false; if(UI.tab === 'search') render(); }
 }
 async function recommendNoAI(){
   const pool = S.books.filter(b => b.rating >= 4).sort((a,b) => b.rating - a.rating);
@@ -816,14 +960,14 @@ async function recommendNoAI(){
   const ok = r => { const k = norm(r.title); if(!r.thumb || seen.has(k) || S.books.some(b => similar(b.title, r.title))) return false; seen.add(k); return true; };
   for(const b of base){
     const au = (b.author || '').split(',')[0].trim(); if(!au) continue;
-    let res = []; try{ res = await gbSearch('inauthor:"' + au + '"', 15); }catch(e){}
+    let res = []; try{ res = await olSearch({author:au, sort:'readinglog', limit:15}); }catch(e){}
     const pick = res.find(ok);
     if(pick) out.push(Object.assign(pick, {genre:b.genre, why:'Du même auteur que ' + b.title + (b.rating ? ', que tu as noté ' + b.rating + '/5' : '') + '.', spiceEst:null}));
     if(out.length >= 3) break;
   }
   const count = {}; base.forEach(b => count[b.genre] = (count[b.genre]||0) + 1);
   const g = Object.keys(count).sort((a,b) => count[b] - count[a])[0];
-  if(g){ let res = []; try{ res = await gbSearch(GB_GENRE[g] || g, 30); }catch(e){}
+  if(g){ let res = []; try{ res = await gbGenreList(g); }catch(e){}
     res.filter(ok).slice(0, 5 - out.length).forEach(r => out.push(Object.assign(r, {genre:g, why:'Populaire en ' + g + ', ton genre préféré.', spiceEst:null}))); }
   if(!out.length) throw new Error('Pas de suggestion trouvée pour l\'instant.');
   return out;
@@ -850,7 +994,7 @@ async function recommend(ask){
 async function addSearch(q){
   SHEET.q = q; if(!q) return;
   SHEET.loading = true; SHEET.error = ''; renderSheet();
-  try{ SHEET.results = await gbSearch(q, 15); }catch(e){ SHEET.error = e.message; }
+  try{ SHEET.results = await bookSearch(q, 15); }catch(e){ SHEET.error = e.message; }
   SHEET.loading = false; if(SHEET && SHEET.kind==='add') renderSheet();
 }
 async function manualAdd(title, author){
@@ -864,10 +1008,15 @@ async function extractNoAI(text){
   const noise = /[@#]|https?:|www\.|\b(likes?|j'aime|abonn|suivre|follow|comment|r[ée]pon|reply|reels?|audio|vues|views|partag|envoyer|send|sponsoris|traduction|voir la)/i;
   const lines = [...new Set(String(text||'').split(/\n+/).map(x => x.replace(/[•|]+/g,' ').trim()))]
     .filter(x => x.length >= 3 && x.length <= 80 && !noise.test(x) && /[a-zà-ÿ]{3}/i.test(x)).slice(0, 14);
-  const found = await Promise.all(lines.map(async l => {
-    let res = []; try{ res = await gbSearch(l, 4); }catch(e){}
-    return res.find(r => similar(r.title, l) && r.title.length >= 3) || null;
-  }));
+  const found = [];
+  for(let i = 0; i < lines.length; i += 4){
+    const part = await Promise.all(lines.slice(i, i+4).map(async l => {
+      let res = []; try{ res = await olSearch({q:l, limit:5}); }catch(e){}
+      if(!res.some(r => similar(r.title, l))){ try{ res = res.concat(await gbSearch(l, 4)); }catch(e){} }
+      return res.filter(r => similar(r.title, l) && r.title.length >= 3).sort((a,b) => (b.thumb?1:0) - (a.thumb?1:0) || (b.reads||0) - (a.reads||0))[0] || null;
+    }));
+    found.push(...part);
+  }
   const seen = new Set();
   return found.filter(r => r && !seen.has(norm(r.title)) && seen.add(norm(r.title)));
 }
@@ -889,7 +1038,7 @@ async function startImport(input){
         if(e.busy && input.text){
           SHEET.msg = 'L\'IA est surchargée, recherche sans IA…'; renderSheet();
           cands = await extractNoAI(input.text);
-          if(cands.length){ SHEET.note = 'L\'IA était surchargée : livres trouvés sans IA. Les résumés et le spice seront ajoutés si l\'IA répond au moment de l\'ajout.'; }
+          if(cands.length){ SHEET.note = 'L\'IA était surchargée : livres trouvés sans IA. Tu pourras compléter le résumé et le spice plus tard depuis la fiche du livre.'; }
           else throw e;
         } else throw e;
       }

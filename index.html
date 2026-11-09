@@ -268,16 +268,17 @@ async function syncNow(manual){
     if(manual) toast(changed ? 'Liste synchronisée' : 'Tout est à jour');
   }catch(e){ SYNC.err = e.message; if(manual) toast(e.message); }
   SYNC.busy = false;
-  if(changed){ render(); if(SHEET && SHEET.kind === 'detail' && SHEET.id && !S.books.some(b => b.id === SHEET.id)) SHEET = null; }
+  if(changed){ render(); if(SHEET && SHEET.kind === 'detail' && SHEET.id && !S.books.some(b => b.id === SHEET.id)) closeSheet(); }
   renderSheet();
 }
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden' && SYNC.timer && S.settings.ghToken){ clearTimeout(SYNC.timer); SYNC.timer = null; syncNow(false); } });
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && S.settings.ghToken && Date.now() - (S.lastSync || 0) > 20000) syncNow(false); });
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 
-const UI = { tab:'lib', seg:'reading', libGenre:'', libTag:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
+const UI = { tab:'lib', seg:'reading', libGenre:'', libTag:'', libSeries:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
 let SHEET = null;
-let LAST_INPUT = null;   // {kind:'detail'|'add'|'import'|'settings', ...}
+let LAST_INPUT = null;
+let NEXT_STATUS = 'toread';   // {kind:'detail'|'add'|'import'|'settings', ...}
 
 /* ============ Utilitaires ============ */
 const $ = (s) => document.querySelector(s);
@@ -465,7 +466,8 @@ async function extractBooks({text, image}){
 async function enrichBooks(cands){
   const system = 'Tu es une libraire experte. Pour chaque livre reçu, donne des informations fiables en français. Genre : exactement un parmi ' + GENRES.join(', ') + '. Définitions : ' + GENRE_DEF + ' Spice = intensité des scènes de sexe, de 0 (aucune) à 5 (très explicite), seulement pour Romance et Romantasy, sinon null. Si tu n\'es pas sûre d\'une info de série, mets null. Réponds uniquement en JSON, dans le même ordre que l\'entrée : {"books":[{"title":"","author":"","series":null,"tome":null,"seriesTotal":null,"genre":"","tags":[""],"summary":"","spice":null}]}';
   const items = cands.map((c, i) => ({n:i+1, title:c.title, author:c.author, categories:c.categories, description:(c.desc||'').slice(0,1200)}));
-  const text = 'Livres :\n' + JSON.stringify(items) + '\n\n"title" : le titre tel que publié (corrige seulement les erreurs). "series" : nom de la série ou null. "tome" : numéro du livre dans la série. "seriesTotal" : nombre total de tomes parus ou prévus. "tags" : 2 ou 3 mots-clés courts (thèmes ou tropes, ex. "Dragons", "Enemies to lovers", "Huis clos"). "summary" : 3 à 4 phrases en français, sans spoiler.';
+  const known = [...new Set(S.books.map(b => b.series).filter(Boolean))].slice(0,100);
+  const text = 'Livres :\n' + JSON.stringify(items) + '\n\n"title" : le titre tel que publié (corrige seulement les erreurs). "series" : nom de la série ou null' + (known.length ? ' (si le livre appartient à une de ces séries déjà dans sa bibliothèque, réutilise exactement ce nom : ' + known.join(' ; ') + ')' : '') + '. "tome" : numéro du livre dans la série. "seriesTotal" : nombre total de tomes parus ou prévus. "tags" : 2 ou 3 mots-clés courts (thèmes ou tropes, ex. "Dragons", "Enemies to lovers", "Huis clos"). "summary" : 3 à 4 phrases en français, sans spoiler.';
   const out = await ai({system, text, max_tokens: 1000 + cands.length * 600});
   const arr = parseJSON(out).books || [];
   return cands.map((c, i) => {
@@ -487,7 +489,7 @@ function makeBook(c, source, status){
     status:status||'toread', isbn:c.isbn||'', thumb:c.thumb||'', gid:c.gid||'', pages:c.pages||null, year:c.year||'',
     enriched:!!c.enriched, source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), updatedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
 }
-async function addCandidates(cands, source){
+async function addCandidates(cands, source, status){
   cands = cands.filter(c => !findOwned(c.title));
   if(!cands.length){ toast('Déjà dans ta liste.'); return []; }
   await Promise.all(cands.map(async c => { if(!c.desc && c.olKey) c.desc = await olDesc(c.olKey); }));
@@ -495,7 +497,7 @@ async function addCandidates(cands, source){
   if(hasAI()){
     try{ rich = await enrichBooks(cands); }catch(e){ toast('Ajouté sans les infos de l\'IA : ' + e.message); }
   }
-  const added = rich.map(c => makeBook(c, source));
+  const added = rich.map(c => makeBook(c, source, status));
   S.books.unshift(...added); save();
   return added;
 }
@@ -528,6 +530,7 @@ function render(){
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.val; el.focus(); try{ el.setSelectionRange(keep.pos, keep.pos); }catch(e){} } }
 }
 
+const statusSeg = () => `<div class="col" style="gap:8px"><span class="label">Ajouter dans</span><div class="seg">${[['toread','À lire'],['reading','En cours'],['read','Lus']].map(([k,l]) => `<button type="button" class="${(SHEET.status||'toread')===k?'on':''}" data-a="setStatus" data-v="${k}">${l}</button>`).join('')}</div></div>`;
 const folderSVG = c => `<svg width="18" height="18" viewBox="0 0 24 24" fill="${c}" fill-opacity=".18" stroke="${c}" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
 function viewLib(){
   const by = s => S.books.filter(b => b.status === s);
@@ -543,6 +546,14 @@ function viewLib(){
   const tags = Object.entries(tagMap).sort((a,b) => b[1].n - a[1].n || a[1].label.localeCompare(b[1].label));
   if(UI.libTag && !tagMap[UI.libTag]) UI.libTag = '';
   if(UI.libTag) list = list.filter(b => (b.tags || []).some(t => norm(t) === UI.libTag));
+  const bySeries = {};
+  if(seg === 'read') list.forEach(b => { if(b.series){ const k = norm(b.series); (bySeries[k] = bySeries[k] || []).push(b); } });
+  if(UI.libSeries && !(bySeries[UI.libSeries] && bySeries[UI.libSeries].length)) UI.libSeries = '';
+  let seriesHead = '';
+  if(seg === 'read' && UI.libSeries){
+    list = bySeries[UI.libSeries].slice().sort((a,b) => (a.tome||99) - (b.tome||99));
+    seriesHead = `<div class="row" style="gap:10px"><button class="icon-btn" data-a="closeSeries" aria-label="Retour aux livres lus">${I.back}</button><div><h2>${esc(list[0].series)}</h2><p class="small">${plural(list.length,'livre')} ${list.length>1?'lus':'lu'}</p></div></div>`;
+  }
   const needBackup = S.books.length >= 3 && Date.now() - (S.lastBackup||0) > 30*86400000;
   let body;
   if(!S.books.length){
@@ -556,8 +567,22 @@ function viewLib(){
         <div class="meta"><span style="font-size:16px;font-weight:600;line-height:1.25">${esc(b.title)}</span><span class="aut">${esc(b.author)}</span>${b.series?`<span class="small">${esc(seriesLine(b))}</span>`:''}<span>${genreTag(b.genre)}</span></div>
       </button>`).join('')}</div>`;
   } else {
-    body = `<div class="grid3">${list.map(b => `
-      <button class="gitem" data-a="open" data-v="${b.id}">${coverHTML(b)}<span class="t1">${esc(b.title)}</span><span class="t2">${seg==='read' && b.rating ? '★ ' + b.rating + ' · ' : ''}${esc(b.author)}</span></button>`).join('')}</div>`;
+    const bookItem = b => `
+      <button class="gitem" data-a="open" data-v="${b.id}">${coverHTML(b)}<span class="t1">${esc(b.title)}</span><span class="t2">${seg==='read' && b.rating ? '★ ' + b.rating + ' · ' : ''}${UI.libSeries && b.tome ? 'Tome ' + b.tome : esc(b.author)}</span></button>`;
+    const seriesItem = (k, books) => {
+      const first = books.slice().sort((a,b) => (a.tome||99) - (b.tome||99))[0];
+      const rated = books.filter(b => b.rating > 0);
+      const avg = rated.length ? (rated.reduce((s,b) => s + b.rating, 0) / rated.length).toFixed(1).replace('.', ',') : '';
+      return `<button class="gitem" data-a="openSeries" data-v="${esc(k)}" aria-label="Série ${esc(first.series)}, ${books.length} livres">
+        <div style="position:relative">${coverHTML(first, 'box-shadow:4px 4px 0 -1px #fff,4px 4px 0 0 #D6D6DC,8px 8px 0 -1px #fff,8px 8px 0 0 #D6D6DC')}<span style="position:absolute;top:6px;right:6px;background:var(--ink);color:#fff;font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px">${books.length}</span></div>
+        <span class="t1" style="margin-top:4px">${esc(first.series)}</span><span class="t2">${avg ? '★ ' + avg + ' · ' : ''}${plural(books.length,'livre')}</span></button>`;
+    };
+    let items;
+    if(seg === 'read' && !UI.libSeries){
+      const done = new Set(); items = [];
+      list.forEach(b => { const k = b.series ? norm(b.series) : ''; if(k && bySeries[k].length > 1){ if(!done.has(k)){ done.add(k); items.push(seriesItem(k, bySeries[k])); } } else items.push(bookItem(b)); });
+    } else items = list.map(bookItem);
+    body = `<div class="grid3">${items.join('')}</div>`;
   }
   return `
   <div class="row between">
@@ -571,11 +596,12 @@ function viewLib(){
     <button class="${seg==='toread'?'on':''}" data-a="seg" data-v="toread">À lire</button>
     <button class="${seg==='read'?'on':''}" data-a="seg" data-v="read">Lus</button>
   </div>
-  ${present.length && seg !== 'reading' ? `<div class="folders" role="group" aria-label="Genres">
+  ${present.length && seg !== 'reading' && !UI.libSeries ? `<div class="folders" role="group" aria-label="Genres">
       <button class="folder ${!UI.libGenre?'on':''}" data-a="libGenre" data-v="">${folderSVG('#111114')}Tous<b>${segCount}</b></button>
       ${present.map(x => `<button class="folder ${UI.libGenre===x.g?'on':''}" data-a="libGenre" data-v="${esc(x.g)}">${folderSVG(GSTYLE[x.g].bar)}${esc(x.g)}<b>${x.n}</b></button>`).join('')}
     </div>` : ''}
-  ${tags.length && seg !== 'reading' ? `<div class="col" style="gap:8px"><span class="label">Tags</span><div class="chips scroll">${UI.libTag ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer</button>` : ''}${tags.map(([k,t]) => `<button class="chip sm ${UI.libTag===k?'on':''}" data-a="libTag" data-v="${esc(k)}">${esc(t.label)} · ${t.n}</button>`).join('')}</div></div>` : ''}
+  ${seriesHead}
+  ${tags.length && seg !== 'reading' && !UI.libSeries ? `<div class="col" style="gap:8px"><span class="label">Tags</span><div class="chips scroll">${UI.libTag ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer</button>` : ''}${tags.map(([k,t]) => `<button class="chip sm ${UI.libTag===k?'on':''}" data-a="libTag" data-v="${esc(k)}">${esc(t.label)} · ${t.n}</button>`).join('')}</div></div>` : ''}
   ${body}`;
 }
 
@@ -725,7 +751,50 @@ function renderSheet(){
   const inner = SHEET.kind==='add' ? sheetAdd() : SHEET.kind==='import' ? sheetImport() : sheetSettings();
   el.innerHTML = `<div class="backdrop" data-a="close"></div><div class="pane" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
 }
-function closeSheet(){ SHEET = null; renderSheet(); render(); }
+/* ============ Navigation « retour » (bouton Safari + glisser vers la droite) ============ */
+let NAV_SKIP = 0;
+function navPush(){ if(NAV_SKIP){ setTimeout(navPush, 80); return; } try{ history.pushState({nav:Date.now()}, ''); }catch(e){} }
+function navPop(){ if(history.state && history.state.nav){ NAV_SKIP++; history.back(); } }
+function openSheet(obj){ const had = !!SHEET; SHEET = obj; renderSheet(); if(!had) navPush(); }
+function backStep(){
+  if(SHEET){ SHEET = null; renderSheet(); render(); return true; }
+  if(UI.libSeries){ UI.libSeries = ''; render(); return true; }
+  return false;
+}
+function goBack(){ if(history.state && history.state.nav) history.back(); else backStep(); }
+window.addEventListener('popstate', () => { if(NAV_SKIP){ NAV_SKIP--; return; } backStep(); });
+function closeSheet(){ const was = !!SHEET; SHEET = null; renderSheet(); render(); if(was) navPop(); }
+(function swipeBack(){
+  const standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  let st = null;
+  const target = () => SHEET ? document.querySelector('#sheet .full, #sheet .pane') : (UI.libSeries ? document.getElementById('view') : null);
+  document.addEventListener('touchstart', e => {
+    st = null;
+    if(e.touches.length !== 1 || (!SHEET && !UI.libSeries)) return;
+    const t = e.touches[0];
+    if(!standalone && t.clientX < 28) return; // laisse Safari gérer son propre geste depuis le bord
+    if(e.target.closest('input,select,textarea,.chips.scroll,.rate')) return;
+    st = {x:t.clientX, y:t.clientY, dx:0, lock:null, el:target()};
+  }, {passive:true});
+  document.addEventListener('touchmove', e => {
+    if(!st) return;
+    const t = e.touches[0]; const dx = t.clientX - st.x, dy = t.clientY - st.y;
+    if(st.lock === null && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) st.lock = Math.abs(dx) > Math.abs(dy) * 1.3 && dx > 0 ? 'x' : 'y';
+    if(st.lock !== 'x') return;
+    st.dx = Math.max(0, dx);
+    if(st.el){ st.el.style.transition = 'none'; st.el.style.transform = 'translateX(' + st.dx + 'px)'; }
+  }, {passive:true});
+  document.addEventListener('touchend', () => {
+    if(!st) return;
+    const s0 = st; st = null;
+    if(s0.lock !== 'x'){ return; }
+    const el = s0.el;
+    if(s0.dx > Math.min(120, window.innerWidth * 0.28)){
+      if(el){ el.style.transition = 'transform .18s ease-out'; el.style.transform = 'translateX(100%)'; }
+      setTimeout(() => { if(el){ el.style.transition = ''; el.style.transform = ''; } goBack(); }, 170);
+    } else if(el){ el.style.transition = 'transform .18s ease-out'; el.style.transform = ''; setTimeout(() => { el.style.transition = ''; }, 200); }
+  }, {passive:true});
+})();
 function sheetHead(title){ return `<div class="row between"><h2 style="font-size:20px">${title}</h2><button class="icon-btn" data-a="close" aria-label="Fermer">${I.close}</button></div>`; }
 
 function currentBook(){
@@ -777,6 +846,13 @@ function sheetDetail(){
         ${b.finishedAt ? `<p class="small">Terminé le ${fmtDate(b.finishedAt)}</p>` : b.startedAt ? `<p class="small">Commencé le ${fmtDate(b.startedAt)}</p>` : ''}
       </div>
       ${!b.enriched && hasAI() ? `<button class="btn line block" data-a="enrichOne" ${SHEET.busy?'disabled':''}>${SHEET.busy ? 'L\'IA complète la fiche…' : I.tabMe + ' Compléter avec l\'IA (résumé, genre, spice)'}</button>` : ''}
+      <form class="col" style="gap:8px" data-form="series">
+        <label class="label" for="serIn">Série</label>
+        <div class="row" style="gap:8px"><input id="serIn" class="inp" list="serList" placeholder="Ex. ACOTAR (vide si aucune)" value="${esc(b.series||'')}" autocomplete="off" style="flex:1"><label class="sr" for="tomeIn">Tome</label><input id="tomeIn" class="inp" style="width:86px" type="number" inputmode="numeric" min="0" placeholder="Tome" value="${esc(b.tome||'')}"></div>
+        <datalist id="serList">${[...new Set(S.books.map(x => x.series).filter(Boolean))].map(x => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+        <p class="small" style="line-height:1.4">Les livres lus qui ont le même nom de série sont rangés ensemble dans un dossier.</p>
+        <button class="btn light block">Enregistrer la série</button>
+      </form>
       <div class="col" style="gap:8px"><label class="label" for="genreSel">Genre</label>
         <select id="genreSel" class="inp" data-change="genre">${GENRES.map(g => `<option ${g===b.genre?'selected':''}>${esc(g)}</option>`).join('')}</select></div>
       ${SHEET.confirmDel ? `<div class="panel"><p style="font-size:14px">Supprimer « ${esc(b.title)} » de ta liste ?</p><div class="row"><button class="btn light" style="flex:1" data-a="cancelDel">Annuler</button><button class="btn" style="flex:1;background:#B42318" data-a="doDel">Supprimer</button></div></div>`
@@ -791,6 +867,7 @@ function sheetAdd(){
   else if(A.error) res = `<div class="err">${esc(A.error)}</div>`;
   else if(A.results) res = A.results.length ? `<div>${A.results.map((r,i) => resultRow(r,'add',i)).join('')}</div>` : `<div class="empty">Aucun résultat. Tu peux l'ajouter à la main ci-dessous.</div>`;
   return `${sheetHead('Ajouter un livre')}
+  ${statusSeg()}
   <form class="field" data-form="addsearch">${I.search}<label class="sr" for="aq">Titre ou auteur</label><input id="aq" type="search" enterkeyhint="search" placeholder="Titre ou auteur…" value="${esc(A.q||'')}" autocomplete="off"></form>
   ${res}
   <button class="btn line block" data-a="pickShot">${I.image} Depuis une capture d'écran</button>
@@ -818,6 +895,7 @@ function sheetImport(){
         <div class="meta"><span class="ttl">${esc(x.cand.title)}</span><span class="aut">${esc(x.cand.author || 'Auteur inconnu')}</span>${x.owned ? '<span class="small">Déjà dans ta liste</span>' : ''}</div>
         ${x.owned ? '' : `<span class="check ${x.checked?'on':''}">${x.checked ? I.check : ''}</span>`}
       </button>`).join('')}</div>
+    ${statusSeg()}
     <p class="small" style="line-height:1.45">Un autre livre plus loin dans la vidéo ? Retourne sur Instagram et refais un double tap : il s'ajoutera à cette liste.</p>
     <button class="btn block" data-a="confirmImp" ${!n || M.busy ? 'disabled' : ''}>${M.busy ? '<div class="spinner" style="border-top-color:#fff;border-color:#555"></div> Préparation des fiches…' : 'Ajouter ' + plural(n, 'livre') + ' à lire'}</button>`;
 }
@@ -858,32 +936,34 @@ function candFrom(ref){
   const arr = list==='res' ? UI.sResults : list==='pop' ? UI.pop : list==='aip' ? UI.aiPicks : list==='rec' ? S.recs : list==='add' ? (SHEET && SHEET.results) : null;
   return arr ? arr[Number(i)] : null;
 }
-async function addOne(cand, sourceType){
+async function addOne(cand, sourceType, status){
   const src = {type:sourceType, date:Date.now()};
-  const added = await addCandidates([cand], src);
+  const added = await addCandidates([cand], src, status);
   if(added.length) toast('« ' + added[0].title + ' » ajouté à ta liste');
   return added[0];
 }
 const A = {
   tab(v){ UI.tab = v; render(); window.scrollTo(0,0); },
-  seg(v){ UI.seg = v; UI.libGenre = ''; UI.libTag = ''; render(); },
+  seg(v){ if(UI.libSeries) navPop(); UI.seg = v; UI.libGenre = ''; UI.libTag = ''; UI.libSeries = ''; render(); },
+  openSeries(v){ UI.libSeries = v; render(); window.scrollTo(0,0); navPush(); },
+  closeSeries(){ goBack(); },
   libGenre(v){ UI.libGenre = UI.libGenre === v && v ? '' : v; UI.libTag = ''; render(); },
   libTag(v){ UI.libTag = UI.libTag === v ? '' : v; render(); },
   seeTag(v){ UI.tab = 'lib'; UI.libGenre = ''; UI.libTag = v; const b = currentBook(); if(b) UI.seg = b.status; closeSheet(); },
-  open(v){ SHEET = {kind:'detail', id:v}; renderSheet(); },
-  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip'); SHEET = {kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}; renderSheet(); },
+  open(v){ openSheet({kind:'detail', id:v}); },
+  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip'); openSheet({kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}); },
   close(){ if(SHEET && SHEET.kind === 'import' && SHEET.phase === 'pick'){ S.pending = null; saveLocal(); } closeSheet(); },
   async addCurrent(){
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
     const ref = SHEET.ref; const b = await addOne(SHEET.cand, SHEET.srcType);
     if(ref && ref.startsWith('rec')) S.recs.splice(Number(ref.split(':')[1]), 1), save();
-    SHEET = b ? {kind:'detail', id:b.id} : null; renderSheet(); render();
+    if(b){ SHEET = {kind:'detail', id:b.id}; renderSheet(); render(); } else closeSheet();
   },
   async addCand(v, el){
     const c = candFrom(v); if(!c) return;
     el.disabled = true; el.innerHTML = '<div class="spinner"></div>';
     const type = (v.startsWith('rec') || v.startsWith('aip')) ? 'ia' : 'recherche';
-    await addOne(c, type);
+    await addOne(c, type, v.startsWith('add') && SHEET ? SHEET.status : 'toread');
     if(v.startsWith('rec')){ S.recs.splice(Number(v.split(':')[1]), 1); save(); }
     if(SHEET && SHEET.kind === 'add') renderSheet();
     render();
@@ -902,9 +982,10 @@ const A = {
   askDel(){ SHEET.confirmDel = true; renderSheet(); },
   cancelDel(){ SHEET.confirmDel = false; renderSheet(); },
   doDel(){ S.deleted = S.deleted || {}; S.deleted[SHEET.id] = Date.now(); S.books = S.books.filter(b => b.id !== SHEET.id); save(); closeSheet(); toast('Livre supprimé'); },
-  openAdd(){ SHEET = {kind:'add', q:'', results:null}; renderSheet(); },
-  openSettings(){ SHEET = {kind:'settings', nokey: !S.settings.apiKey}; renderSheet(); },
-  pickShot(){ const f = $('#fileShot'); f.value = ''; f.click(); },
+  openAdd(){ openSheet({kind:'add', q:'', results:null, status: UI.tab === 'lib' ? UI.seg : 'toread'}); },
+  setStatus(v){ SHEET.status = v; if(SHEET.kind === 'import' && S.pending){ S.pending.status = v; saveLocal(); } renderSheet(); },
+  openSettings(){ openSheet({kind:'settings', nokey: !S.settings.apiKey}); },
+  pickShot(){ NEXT_STATUS = SHEET && SHEET.status || NEXT_STATUS; const f = $('#fileShot'); f.value = ''; f.click(); },
   sGenre(v){ if(v !== UI.sGenre) UI.sSpice = ''; UI.sGenre = v; if(UI.q) runSearch(); else if(v) loadGenre(); else render(); },
   refreshAI(){ loadAIPicks(true); },
   toggleRead(){ UI.hideRead = !UI.hideRead; render(); },
@@ -915,9 +996,10 @@ const A = {
   async confirmImp(){
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
     const picks = SHEET.items.filter(x => x.checked).map(x => x.cand);
-    const added = await addCandidates(picks, SHEET.source);
+    const st = SHEET.status || 'toread';
+    const added = await addCandidates(picks, SHEET.source, st);
     S.pending = null; save();
-    SHEET = null; renderSheet(); UI.tab = 'lib'; UI.seg = 'toread'; render();
+    closeSheet(); UI.tab = 'lib'; UI.seg = st; UI.libGenre = ''; UI.libTag = ''; UI.libSeries = ''; render();
     if(added.length) toast(plural(added.length, 'livre') + ' ' + (added.length>1?'ajoutés':'ajouté') + ' à ta liste');
   },
   exportData(){
@@ -968,6 +1050,7 @@ document.addEventListener('submit', e => {
   const k = f.dataset.form;
   if(k === 'search'){ UI.q = $('#q').value.trim(); $('#q').blur(); if(UI.q) runSearch(); else if(UI.sGenre) loadGenre(); else { UI.sResults = null; render(); } }
   if(k === 'ask'){ const v = $('#ask').value.trim(); if(v) recommend(v); }
+  if(k === 'series'){ const b = currentBook(); if(b){ const v = $('#serIn').value.trim(); const ex = S.books.find(x => x !== b && x.series && norm(x.series) === norm(v)); b.series = ex ? ex.series : v; b.tome = Number($('#tomeIn').value) || null; touch(b); save(); renderSheet(); render(); toast(b.series ? 'Rangé dans la série « ' + b.series + ' »' : 'Série retirée'); } }
   if(k === 'addsearch'){ addSearch($('#aq').value.trim()); }
   if(k === 'manual'){ manualAdd($('#mt').value.trim(), $('#ma').value.trim()); }
   if(k === 'settings'){
@@ -1112,8 +1195,8 @@ async function manualAdd(title, author){
   if(!title) return;
   SHEET.busy = true; renderSheet();
   const c = await lookup(title, author);
-  const b = await addOne(c, 'manuel');
-  SHEET = b ? {kind:'detail', id:b.id} : null; renderSheet(); render();
+  const b = await addOne(c, 'manuel', SHEET.status);
+  if(b){ SHEET = {kind:'detail', id:b.id}; renderSheet(); render(); } else closeSheet();
 }
 async function extractNoAI(text){
   const noise = /[@#]|https?:|www\.|\b(likes?|j'aime|abonn|suivre|follow|comment|r[ée]pon|reply|reels?|audio|vues|views|partag|envoyer|send|sponsoris|traduction|voir la)/i;
@@ -1133,7 +1216,10 @@ async function extractNoAI(text){
 }
 async function startImport(input){
   LAST_INPUT = input;
-  SHEET = {kind:'import', phase:'loading', msg: hasAI() ? 'L\'IA lit ta capture…' : 'Lecture de la capture…', items:[], source:{type:input.image ? 'capture' : 'instagram', url:input.url||'', date:Date.now()}};
+  const keepStatus = (S.pending && Date.now() - S.pending.at < 20*60000 && S.pending.status) || (input.image ? NEXT_STATUS : 'toread');
+  NEXT_STATUS = 'toread';
+  if(!SHEET) navPush();
+  SHEET = {kind:'import', status:keepStatus, phase:'loading', msg: hasAI() ? 'L\'IA lit ta capture…' : 'Lecture de la capture…', items:[], source:{type:input.image ? 'capture' : 'instagram', url:input.url||'', date:Date.now()}};
   renderSheet();
   try{
     if(!input.text && !input.image) throw new Error('La capture n\'a pas pu être lue. Choisis-la dans Photos ci-dessous.');
@@ -1166,7 +1252,7 @@ async function startImport(input){
     pend.forEach(p => { if(!items.some(x => norm(x.cand.title) === norm(p.cand.title))) items.unshift(Object.assign(p, {owned:!!findOwned(p.cand.title)})); });
     if(before) SHEET.note = (SHEET.note ? SHEET.note + ' ' : '') + 'Les livres de ta capture précédente sont gardés : tu peux enchaîner plusieurs captures avant de valider.';
     SHEET.items = items;
-    S.pending = {at:Date.now(), items, source:SHEET.source}; save();
+    S.pending = {at:Date.now(), items, source:SHEET.source, status:SHEET.status}; save();
     SHEET.phase = 'pick';
   }catch(e){
     SHEET.phase = 'error'; SHEET.error = e.message; SHEET.nokey = !!e.nokey;

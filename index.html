@@ -128,7 +128,7 @@ const GSTYLE = {
 const GENRE_DEF = 'Romantasy = fantasy avec une histoire d\'amour centrale. Fantasy = fantasy sans romance centrale. Romance = histoire d\'amour contemporaine ou autre, sans magie. Roman = littérature générale ou contemporaine. Policier & thriller = polar, enquête, suspense, thriller psychologique. Historique = roman historique. Science-fiction = SF, dystopie. Feel-good = roman doudou, cosy, réconfortant. Non-fiction = essai, biographie, développement personnel, documentaire.';
 const SPICY = new Set(['Romance','Romantasy']);
 const SPICE_BANDS = {'':'Spice : tous','doux':'Doux (0-1)','moyen':'Moyen (2-3)','epice':'Épicé (4-5)'};
-const GEMINI_MODELS = ['gemini-flash-latest','gemini-2.5-flash'];
+const GEMINI_MODELS = ['gemini-flash-latest','gemini-2.5-flash','gemini-flash-lite-latest','gemini-2.5-flash-lite'];
 const GB_GENRE = {'Romantasy':'romantasy','Fantasy':'subject:fantasy','Romance':'subject:romance','Roman':'subject:"literary fiction"','Policier & thriller':'subject:thriller','Historique':'subject:"historical fiction"','Science-fiction':'subject:"science fiction"','Feel-good':'"feel good" roman','Non-fiction':'subject:biography'};
 const STORE = 'ma-liste-lecture-v1';
 const COVER_COLORS = ['#7A2E1F','#1F3A5F','#3B3B3B','#5C1A1A','#2D4A3E','#4A5568','#0F5257','#8C2F39','#5B1E2D','#7A5C2E'];
@@ -165,7 +165,8 @@ function save(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 
 const UI = { tab:'lib', seg:'reading', libGenre:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
-let SHEET = null;   // {kind:'detail'|'add'|'import'|'settings', ...}
+let SHEET = null;
+let LAST_INPUT = null;   // {kind:'detail'|'add'|'import'|'settings', ...}
 
 /* ============ Utilitaires ============ */
 const $ = (s) => document.querySelector(s);
@@ -251,7 +252,9 @@ async function ai({system, text, image, max_tokens}){
   const body = JSON.stringify({systemInstruction:{parts:[{text:system}]}, contents:[{role:'user', parts}], generationConfig:{responseMimeType:'application/json', maxOutputTokens:Math.max(8192, max_tokens||0), temperature:0.4}});
   const models = [...new Set([S.settings.model].filter(Boolean).concat(GEMINI_MODELS))];
   let lastErr = null;
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
   for(const m of models){
+   for(let attempt = 0; attempt < 2; attempt++){
     let r;
     try{ r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', {method:'POST', headers:{'content-type':'application/json','x-goog-api-key':key}, body}); }
     catch(e){ throw new Error('Pas de connexion à l\'IA. Vérifie ton réseau.'); }
@@ -264,14 +267,19 @@ async function ai({system, text, image, max_tokens}){
       return t;
     }
     let msg = ''; try{ msg = (await r.json()).error.message || ''; }catch(e){}
-    if(r.status === 404){ lastErr = new Error('Modèle Gemini introuvable.'); continue; }
+    if(r.status === 404){ lastErr = new Error('Modèle Gemini introuvable.'); break; }
+    if(r.status === 503 || r.status === 500 || r.status === 502 || r.status === 504){
+      lastErr = new Error('L\'IA gratuite de Google est surchargée en ce moment, réessaie dans quelques minutes.'); lastErr.busy = true;
+      if(attempt === 0){ await sleep(1500); continue; } break;
+    }
+    if(r.status === 429){ lastErr = new Error('Limite gratuite de Gemini atteinte pour le moment, réessaie un peu plus tard.'); lastErr.busy = true; break; }
     if(/location is not supported|not available in your country|free tier is not available|enable billing/i.test(msg)){
       S.settings.aiStatus = 'blocked'; save();
       const e = new Error('Gemini gratuit n\'est pas disponible depuis ton pays : l\'app passe en mode sans IA.'); e.blocked = true; throw e;
     }
     if(r.status === 403 || /api key/i.test(msg)) throw new Error('Clé Gemini refusée : vérifie-la dans les réglages.');
-    if(r.status === 429) throw new Error('Limite gratuite de Gemini atteinte pour le moment, réessaie un peu plus tard.');
     throw new Error('Erreur de l\'IA (' + r.status + ') ' + msg);
+   }
   }
   throw lastErr || new Error('IA indisponible.');
 }
@@ -591,11 +599,12 @@ function sheetImport(){
   const M = SHEET;
   if(M.phase === 'loading') return `${sheetHead('Nouvelle recommandation')}<div class="loading"><div class="spinner"></div>${esc(M.msg || 'L\'IA lit ta capture…')}</div>`;
   if(M.phase === 'error') return `${sheetHead('Nouvelle recommandation')}<div class="err">${esc(M.error)}</div>
-    ${M.nokey ? `<button class="btn block" data-a="openSettings">Ouvrir les réglages</button>` : ''}
+    ${M.nokey ? `<button class="btn block" data-a="openSettings">Ouvrir les réglages</button>` : `<button class="btn block" data-a="retryImport">${I.refresh} Réessayer</button>`}
     <button class="btn line block" data-a="pickShot">${I.image} Choisir la capture dans Photos</button>
     <button class="btn light block" data-a="openAdd">Ajouter à la main</button>`;
   const n = M.items.filter(x => x.checked).length;
   return `${sheetHead(plural(M.items.length, 'livre') + ' ' + (M.items.length>1?'trouvés':'trouvé'))}
+    ${M.note ? `<div class="banner">${esc(M.note)}</div>` : ''}
     <div>${M.items.map((x,i) => `
       <button class="litem" data-a="toggleImp" data-v="${i}" ${x.owned?'disabled':''} aria-pressed="${x.checked}">
         ${coverHTML(x.cand,'width:52px;height:78px')}
@@ -709,6 +718,7 @@ const A = {
     catch(e){ toast(e.message); }
     renderSheet();
   },
+  retryImport(){ if(LAST_INPUT) startImport(LAST_INPUT); },
   importData(){ const f = $('#fileBackup'); f.value = ''; f.click(); },
   async copyLink(){ try{ await navigator.clipboard.writeText(location.origin + location.pathname + '?import='); toast('Adresse copiée'); }catch(e){ toast('Copie impossible, sélectionne l\'adresse à la main.'); } }
 };
@@ -862,6 +872,7 @@ async function extractNoAI(text){
   return found.filter(r => r && !seen.has(norm(r.title)) && seen.add(norm(r.title)));
 }
 async function startImport(input){
+  LAST_INPUT = input;
   SHEET = {kind:'import', phase:'loading', msg: hasAI() ? 'L\'IA lit ta capture…' : 'Lecture de la capture…', items:[], source:{type:input.image ? 'capture' : 'instagram', url:input.url||'', date:Date.now()}};
   renderSheet();
   try{
@@ -873,10 +884,20 @@ async function startImport(input){
     } else {
       let found;
       try{ found = await extractBooks(input); }
-      catch(e){ if(e.blocked && input.text){ return startImport(input); } throw e; }
+      catch(e){
+        if(e.blocked && input.text){ return startImport(input); }
+        if(e.busy && input.text){
+          SHEET.msg = 'L\'IA est surchargée, recherche sans IA…'; renderSheet();
+          cands = await extractNoAI(input.text);
+          if(cands.length){ SHEET.note = 'L\'IA était surchargée : livres trouvés sans IA. Les résumés et le spice seront ajoutés si l\'IA répond au moment de l\'ajout.'; }
+          else throw e;
+        } else throw e;
+      }
+      if(!cands){
       if(!found.length) throw new Error('Aucun livre trouvé sur cette capture. Si le titre n\'apparaît que sur la couverture, choisis la capture dans Photos : l\'IA lira l\'image.');
       SHEET.msg = 'Recherche des couvertures…'; renderSheet();
       cands = await Promise.all(found.map(f => lookup(f.title, f.author)));
+      }
     }
     if(!cands.length) throw new Error('Aucun livre reconnu sur cette capture. Tu peux l\'ajouter à la main.');
     SHEET.items = cands.map(c => { const o = findOwned(c.title); return {cand:c, owned:!!o, checked:!o}; });

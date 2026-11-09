@@ -162,6 +162,7 @@ const GB_GENRE_Q = {
   'Non-fiction':['subject:biography bestseller','essai bestseller','subject:"self-help"']
 };
 const STORE = 'ma-liste-lecture-v1';
+const APP_VERSION = '2026-11-09 · v12';
 const COVER_COLORS = ['#7A2E1F','#1F3A5F','#3B3B3B','#5C1A1A','#2D4A3E','#4A5568','#0F5257','#8C2F39','#5B1E2D','#7A5C2E'];
 const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
@@ -924,6 +925,11 @@ function sheetSettings(){
     <div class="row"><button class="btn line" style="flex:1" data-a="exportData">Exporter</button><button class="btn line" style="flex:1" data-a="importData">Importer</button></div>
   </div>
   <div class="col" style="gap:8px">
+    <span class="label">Version de l'app</span>
+    <div class="row between"><span class="small">${APP_VERSION}</span><button class="btn light" style="height:38px" data-a="forceUpdate">${I.refresh} Mettre à jour</button></div>
+    <p class="small" style="line-height:1.4">Recharge la dernière version mise sur GitHub. Ta liste et tes réglages sont conservés.</p>
+  </div>
+  <div class="col" style="gap:8px">
     <span class="label">Adresse pour le raccourci iPhone</span>
     <div class="code">${esc(link)}?import=</div>
     <button class="btn light block" data-a="copyLink">Copier</button>
@@ -1029,6 +1035,7 @@ const A = {
     if(SHEET) SHEET.busy = false; renderSheet(); render();
   },
   syncNow(){ syncNow(true); },
+  forceUpdate(){ saveLocal(); location.replace(location.pathname + '?maj=' + Date.now()); },
   retryImport(){ if(LAST_INPUT) startImport(LAST_INPUT); },
   importData(){ const f = $('#fileBackup'); f.value = ''; f.click(); },
   async copyLink(){ try{ await navigator.clipboard.writeText(location.origin + location.pathname + '?import='); toast('Adresse copiée'); }catch(e){ toast('Copie impossible, sélectionne l\'adresse à la main.'); } }
@@ -1262,6 +1269,7 @@ async function startImport(input){
 }
 function handleLaunch(){
   const p = new URLSearchParams(location.search);
+  if(p.has('maj')){ history.replaceState(null, '', location.pathname); setTimeout(() => toast('App à jour · ' + APP_VERSION), 400); }
   const text = p.get('import'), url = p.get('url');
   if(text != null || url){
     history.replaceState(null, '', location.pathname);

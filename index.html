@@ -100,6 +100,13 @@ nav#tabs button.on{color:var(--accent);font-weight:600}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 select.mini{border:none;background:var(--soft);border-radius:10px;height:36px;padding:0 10px;font-size:14px;font-weight:500}
 .grab{width:40px;height:5px;border-radius:3px;background:#DCDCE2;align-self:center;margin-top:-8px}
+.folders{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.folder{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:#fff;text-align:left;font-size:14px;font-weight:500;color:var(--ink)}
+.folder b{margin-left:auto;font-weight:600;color:var(--mute);font-size:13px}
+.folder.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);font-weight:600}
+.folder svg{flex-shrink:0}
+.chips.scroll{flex-wrap:nowrap;overflow-x:auto;margin:0 -20px;padding:0 20px 2px;scrollbar-width:none}
+.chips.scroll::-webkit-scrollbar{display:none}
 .code{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:var(--soft);padding:10px 12px;border-radius:10px;word-break:break-all}
 </style>
 </head>
@@ -179,16 +186,84 @@ const starSVG = (on, size=26) => `<svg width="${size}" height="${size}" viewBox=
 const pepSVG = (on, size=26) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${on?'#E8590C':'none'}" stroke="${on?'#C2410C':'#B8B8C0'}" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c.5 3 3.5 4.5 3.5 8.5a3.5 3.5 0 0 1-7 0c0-1.6.8-2.6 1.6-3.4C10.6 10 11 11 12 11c0-2.5-1.5-4.5 0-8z"/><path d="M8.6 14.5A5.2 5.2 0 0 0 12 21a5.2 5.2 0 0 0 5.2-5.2"/></svg>`;
 
 /* ============ Données ============ */
-function defaults(){ return {books:[],settings:{apiKey:'',goal:25,aiStatus:'',model:''},recs:[],dislikes:[],curated:{},lastBackup:0}; }
+function defaults(){ return {deleted:{},books:[],settings:{apiKey:'',goal:25,aiStatus:'',model:'',ghToken:'',gistId:''},recs:[],dislikes:[],curated:{},lastBackup:0}; }
 function loadState(){
   try{ const s = JSON.parse(localStorage.getItem(STORE)); if(s && Array.isArray(s.books)){ const d=defaults(); return Object.assign(d, s, {settings:Object.assign(d.settings, s.settings||{})}); } }catch(e){}
   return defaults();
 }
 let S = loadState();
-function save(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){ toast("Impossible d'enregistrer sur cet appareil."); } }
+function touch(b){ if(b) b.updatedAt = Date.now(); }
+function saveLocal(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){ toast("Impossible d'enregistrer sur cet appareil."); } }
+function save(){ saveLocal(); scheduleSync(); }
+
+/* ============ Synchronisation (gist privé GitHub) ============ */
+const GIST_DESC = 'Ma liste de lecture (sync)', GIST_FILE = 'ma-liste-lecture.json';
+const SYNC = {busy:false, err:'', timer:null, key:''};
+const syncKey = () => JSON.stringify([S.books, S.deleted || {}, S.dislikes || []]);
+function scheduleSync(){
+  if(!S.settings || !S.settings.ghToken) return;
+  if(syncKey() === SYNC.key) return;
+  clearTimeout(SYNC.timer); SYNC.timer = setTimeout(() => syncNow(false), 2500);
+}
+async function gh(path, opt){
+  let r;
+  try{ r = await fetch('https://api.github.com' + path, Object.assign({}, opt || {}, {headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer ' + S.settings.ghToken.trim(),'content-type':'application/json'}})); }
+  catch(e){ throw new Error('Pas de connexion à GitHub.'); }
+  if(r.status === 401) throw new Error('Jeton GitHub refusé : vérifie-le dans les réglages.');
+  if(r.status === 403) throw new Error('Le jeton GitHub n\'a pas le droit « gist ».');
+  if(!r.ok){ const e = new Error('Synchro GitHub impossible (' + r.status + ').'); e.status = r.status; throw e; }
+  return r.json();
+}
+function mergeRemote(rem){
+  if(!rem || !Array.isArray(rem.books)) return false;
+  const before = syncKey();
+  const ts = b => b.updatedAt || b.addedAt || 0;
+  const del = Object.assign({}, rem.deleted || {});
+  Object.entries(S.deleted || {}).forEach(([k, v]) => { if(!del[k] || v > del[k]) del[k] = v; });
+  const map = new Map();
+  rem.books.concat(S.books).forEach(b => { if(!b || !b.id) return; const cur = map.get(b.id); if(!cur || ts(b) > ts(cur)) map.set(b.id, b); });
+  let books = [...map.values()].filter(b => !(del[b.id] && del[b.id] >= ts(b)));
+  const byTitle = new Map();
+  books.forEach(b => { const k = norm(b.title); const o = byTitle.get(k); if(!o) byTitle.set(k, b); else { const keep = ts(b) > ts(o) ? b : o, drop = keep === b ? o : b; del[drop.id] = Date.now(); byTitle.set(k, keep); } });
+  books = [...byTitle.values()].sort((a, b) => (b.addedAt||0) - (a.addedAt||0));
+  S.books = books; S.deleted = del;
+  S.dislikes = [...new Set((S.dislikes || []).concat(rem.dislikes || []))];
+  return syncKey() !== before;
+}
+async function syncNow(manual){
+  if(!S.settings.ghToken){ if(manual) toast('Ajoute d\'abord ton jeton GitHub.'); return; }
+  if(SYNC.busy) return;
+  SYNC.busy = true; SYNC.err = ''; if(SHEET && SHEET.kind === 'settings') renderSheet();
+  let changed = false;
+  try{
+    let gist = null;
+    if(S.settings.gistId){ try{ gist = await gh('/gists/' + S.settings.gistId); }catch(e){ if(e.status !== 404) throw e; S.settings.gistId = ''; } }
+    if(!gist){ const list = await gh('/gists?per_page=100'); const f = list.find(g => g.description === GIST_DESC && g.files && g.files[GIST_FILE]); if(f) gist = await gh('/gists/' + f.id); }
+    if(gist){
+      S.settings.gistId = gist.id;
+      const f = gist.files[GIST_FILE];
+      let content = f && f.content;
+      if(f && f.truncated && f.raw_url){ try{ content = await (await fetch(f.raw_url)).text(); }catch(e){} }
+      let remKey = '';
+      if(content){ try{ const rem = JSON.parse(content); remKey = JSON.stringify([rem.books, rem.deleted || {}, rem.dislikes || []]); changed = mergeRemote(rem); }catch(e){} }
+      if(syncKey() !== remKey){
+        await gh('/gists/' + gist.id, {method:'PATCH', body:JSON.stringify({files:{[GIST_FILE]:{content:JSON.stringify({app:'ma-liste-lecture', v:1, at:Date.now(), books:S.books, deleted:S.deleted || {}, dislikes:S.dislikes || []})}}})});
+      }
+    } else {
+      const g = await gh('/gists', {method:'POST', body:JSON.stringify({description:GIST_DESC, public:false, files:{[GIST_FILE]:{content:JSON.stringify({app:'ma-liste-lecture', v:1, at:Date.now(), books:S.books, deleted:S.deleted || {}, dislikes:S.dislikes || []})}}})});
+      S.settings.gistId = g.id;
+    }
+    SYNC.key = syncKey(); S.lastSync = Date.now(); saveLocal();
+    if(manual) toast(changed ? 'Liste synchronisée' : 'Tout est à jour');
+  }catch(e){ SYNC.err = e.message; if(manual) toast(e.message); }
+  SYNC.busy = false;
+  if(changed){ render(); if(SHEET && SHEET.kind === 'detail' && SHEET.id && !S.books.some(b => b.id === SHEET.id)) SHEET = null; }
+  renderSheet();
+}
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && S.settings.ghToken && Date.now() - (S.lastSync || 0) > 20000) syncNow(false); });
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 
-const UI = { tab:'lib', seg:'reading', libGenre:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
+const UI = { tab:'lib', seg:'reading', libGenre:'', libTag:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
 let SHEET = null;
 let LAST_INPUT = null;   // {kind:'detail'|'add'|'import'|'settings', ...}
 
@@ -370,7 +445,7 @@ function parseJSON(t){
   return JSON.parse(t.slice(start, end + 1));
 }
 async function extractBooks({text, image}){
-  const system = 'Tu reçois une capture d\'écran Instagram (texte extrait par OCR, ou image) où quelqu\'un recommande des livres. Liste chaque livre recommandé. Ignore l\'interface d\'Instagram (pseudos, likes, commentaires, boutons, musique, hashtags qui ne sont pas des titres). Corrige les fautes d\'OCR évidentes et écris le titre tel qu\'il est publié. Si l\'auteur n\'est pas visible mais que tu le connais avec certitude, indique-le ; sinon chaîne vide. Réponds uniquement en JSON : {"books":[{"title":"","author":""}]} ; s\'il n\'y a aucun livre : {"books":[]}.';
+  const system = 'Tu reçois une capture d\'écran Instagram (texte extrait par OCR, ou image) où quelqu\'un recommande des livres. Il y en a souvent plusieurs (top 3, top 5, liste dans la légende, couvertures côte à côte) : liste-les TOUS, un par entrée, sans en oublier. Ignore l\'interface d\'Instagram (pseudos, likes, commentaires, boutons, musique, hashtags qui ne sont pas des titres). Corrige les fautes d\'OCR évidentes et écris le titre tel qu\'il est publié. Si l\'auteur n\'est pas visible mais que tu le connais avec certitude, indique-le ; sinon chaîne vide. Réponds uniquement en JSON : {"books":[{"title":"","author":""}]} ; s\'il n\'y a aucun livre : {"books":[]}.';
   const out = await ai({system, image, text: text ? 'Texte extrait de la capture :\n"""\n' + text.slice(0, 6000) + '\n"""' : 'Voici la capture.'});
   const seen = new Set();
   return (parseJSON(out).books || []).filter(b => b && b.title && !seen.has(norm(b.title)) && seen.add(norm(b.title)));
@@ -398,7 +473,7 @@ function makeBook(c, source, status){
   return { id:uid(), title:c.title, author:c.author||'', series:c.series||'', tome:c.tome||null, seriesTotal:c.seriesTotal||null,
     genre:c.genre||guessGenre(c), tags:c.tags||[], summary:c.summary||(c.desc||'').slice(0,600), spiceEst:c.spiceEst ?? null, spice:null, rating:0,
     status:status||'toread', isbn:c.isbn||'', thumb:c.thumb||'', gid:c.gid||'', pages:c.pages||null, year:c.year||'',
-    enriched:!!c.enriched, source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
+    enriched:!!c.enriched, source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), updatedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
 }
 async function addCandidates(cands, source){
   cands = cands.filter(c => !findOwned(c.title));
@@ -441,14 +516,21 @@ function render(){
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.val; el.focus(); try{ el.setSelectionRange(keep.pos, keep.pos); }catch(e){} } }
 }
 
+const folderSVG = c => `<svg width="18" height="18" viewBox="0 0 24 24" fill="${c}" fill-opacity=".18" stroke="${c}" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
 function viewLib(){
   const by = s => S.books.filter(b => b.status === s);
   const reading = by('reading'), toread = by('toread'), read = by('read').sort((a,b) => (b.finishedAt||0) - (a.finishedAt||0));
   const seg = UI.seg;
   let list = seg==='reading' ? reading : seg==='toread' ? toread : read;
-  const present = GENRES.filter(g => list.some(b => b.genre === g));
-  if(UI.libGenre && !present.includes(UI.libGenre)) UI.libGenre = '';
+  const segCount = list.length;
+  const present = GENRES.map(g => ({g, n:list.filter(b => b.genre === g).length})).filter(x => x.n);
+  if(UI.libGenre && !present.some(x => x.g === UI.libGenre)) UI.libGenre = '';
   if(UI.libGenre) list = list.filter(b => b.genre === UI.libGenre);
+  const tagMap = {};
+  list.forEach(b => (b.tags || []).forEach(t => { const k = norm(t); if(!k) return; (tagMap[k] = tagMap[k] || {label:String(t).trim(), n:0}).n++; }));
+  const tags = Object.entries(tagMap).sort((a,b) => b[1].n - a[1].n || a[1].label.localeCompare(b[1].label));
+  if(UI.libTag && !tagMap[UI.libTag]) UI.libTag = '';
+  if(UI.libTag) list = list.filter(b => (b.tags || []).some(t => norm(t) === UI.libTag));
   const needBackup = S.books.length >= 3 && Date.now() - (S.lastBackup||0) > 30*86400000;
   let body;
   if(!S.books.length){
@@ -477,7 +559,11 @@ function viewLib(){
     <button class="${seg==='toread'?'on':''}" data-a="seg" data-v="toread">À lire</button>
     <button class="${seg==='read'?'on':''}" data-a="seg" data-v="read">Lus</button>
   </div>
-  ${present.length > 1 && seg !== 'reading' ? `<div class="chips"><button class="chip sm ${!UI.libGenre?'on':''}" data-a="libGenre" data-v="">Tous</button>${present.map(g => `<button class="chip sm ${UI.libGenre===g?'on':''}" data-a="libGenre" data-v="${esc(g)}">${esc(g)}</button>`).join('')}</div>` : ''}
+  ${present.length && seg !== 'reading' ? `<div class="folders" role="group" aria-label="Genres">
+      <button class="folder ${!UI.libGenre?'on':''}" data-a="libGenre" data-v="">${folderSVG('#111114')}Tous<b>${segCount}</b></button>
+      ${present.map(x => `<button class="folder ${UI.libGenre===x.g?'on':''}" data-a="libGenre" data-v="${esc(x.g)}">${folderSVG(GSTYLE[x.g].bar)}${esc(x.g)}<b>${x.n}</b></button>`).join('')}
+    </div>` : ''}
+  ${tags.length && seg !== 'reading' ? `<div class="col" style="gap:8px"><span class="label">Tags</span><div class="chips scroll">${UI.libTag ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer</button>` : ''}${tags.map(([k,t]) => `<button class="chip sm ${UI.libTag===k?'on':''}" data-a="libTag" data-v="${esc(k)}">${esc(t.label)} · ${t.n}</button>`).join('')}</div></div>` : ''}
   ${body}`;
 }
 
@@ -589,8 +675,8 @@ function viewStats(){
   const goal = Number(S.settings.goal) || 0;
   const rated = read.filter(b => b.rating > 0);
   const avg = rated.length ? (rated.reduce((s,b) => s + b.rating, 0) / rated.length) : null;
-  const sp = read.filter(b => SPICY.has(b.genre) && b.spice != null);
-  const avgSp = sp.length ? sp.reduce((s,b) => s + b.spice, 0) / sp.length : null;
+  const sp = read.filter(b => SPICY.has(b.genre) && (b.spice ?? b.spiceEst) != null);
+  const avgSp = sp.length ? sp.reduce((s,b) => s + (b.spice ?? b.spiceEst), 0) / sp.length : null;
   const byG = GENRES.map(g => ({g, n: read.filter(b => b.genre === g).length})).filter(x => x.n);
   const months = Array(12).fill(0); read.forEach(b => months[new Date(b.finishedAt).getMonth()]++);
   const mx = Math.max(1, ...months);
@@ -653,7 +739,7 @@ function sheetDetail(){
       <p style="font-size:16px;color:var(--ink2)">${esc(b.author)}</p>
       ${b.series ? `<p style="font-size:14px;color:var(--mute)">${esc(seriesLine(b))}</p>` : ''}
       ${(b.year || b.pages) ? `<p class="small">${[b.year, b.pages ? b.pages + ' pages' : ''].filter(Boolean).join(' · ')}</p>` : ''}
-      <div class="tags" style="margin-top:6px">${genreTag(b.genre)}${(b.tags||[]).map(t => `<span class="tag plain">${esc(t)}</span>`).join('')}</div>
+      <div class="tags" style="margin-top:6px">${genreTag(b.genre)}${(b.tags||[]).map(t => owned ? `<button class="tag plain" style="border:none" data-a="seeTag" data-v="${esc(norm(t))}">${esc(t)}</button>` : `<span class="tag plain">${esc(t)}</span>`).join('')}</div>
     </div>
     ${owned ? `
       <div class="seg">
@@ -663,7 +749,7 @@ function sheetDetail(){
       </div>
       <div style="display:grid;grid-template-columns:${showSpice?'repeat(2,minmax(0,1fr))':'1fr'};gap:12px">
         <div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Ma note</span>${rateRow('rating', b.rating||0)}</div>
-        ${showSpice ? `<div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Spice${b.spice==null && b.spiceEst!=null ? ' · IA : ' + b.spiceEst : ''}</span>${rateRow('spice', b.spice ?? 0)}</div>` : ''}
+        ${showSpice ? `<div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Spice${b.spice==null && b.spiceEst!=null ? ' · estimé IA' : ''}</span>${rateRow('spice', b.spice ?? b.spiceEst ?? 0)}</div>` : ''}
       </div>` : `
       ${already ? `<div class="panel" style="flex-direction:row;align-items:center">Ce livre est déjà dans ta liste.<button class="btn light" style="margin-left:auto;height:38px" data-a="open" data-v="${already.id}">Voir</button></div>` :
       `<button class="btn block" data-a="addCurrent" ${SHEET.busy?'disabled':''}>${SHEET.busy ? '<div class="spinner" style="border-top-color:#fff;border-color:#555"></div> Ajout…' : I.plus + ' Ajouter à ma liste'}</button>`}
@@ -720,6 +806,7 @@ function sheetImport(){
         <div class="meta"><span class="ttl">${esc(x.cand.title)}</span><span class="aut">${esc(x.cand.author || 'Auteur inconnu')}</span>${x.owned ? '<span class="small">Déjà dans ta liste</span>' : ''}</div>
         ${x.owned ? '' : `<span class="check ${x.checked?'on':''}">${x.checked ? I.check : ''}</span>`}
       </button>`).join('')}</div>
+    <p class="small" style="line-height:1.45">Un autre livre plus loin dans la vidéo ? Retourne sur Instagram et refais un double tap : il s'ajoutera à cette liste.</p>
     <button class="btn block" data-a="confirmImp" ${!n || M.busy ? 'disabled' : ''}>${M.busy ? '<div class="spinner" style="border-top-color:#fff;border-color:#555"></div> Préparation des fiches…' : 'Ajouter ' + plural(n, 'livre') + ' à lire'}</button>`;
 }
 
@@ -733,6 +820,10 @@ function sheetSettings(){
     <input id="key" class="inp" type="password" placeholder="AIza…" value="${esc(S.settings.apiKey)}" autocomplete="off" autocapitalize="off" spellcheck="false">
     <p class="small" style="line-height:1.45">Crée-la gratuitement sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> avec ton compte Google, sans carte bancaire. Elle reste uniquement sur ce téléphone. Sans clé, l'app marche quand même, sans résumés en français, spice estimé ni recos de l'IA.</p>
     ${S.settings.apiKey ? `<button type="button" class="btn light block" data-a="testAI">Tester la clé</button>` : ''}
+    <label class="label" for="gh" style="margin-top:10px">Synchro téléphone ↔ ordinateur</label>
+    <p class="small" style="line-height:1.45">Pour avoir la même liste partout, l'app garde une copie privée dans ton compte GitHub. Crée un jeton sur <a href="https://github.com/settings/tokens/new?scopes=gist&description=Ma%20liste%20de%20lecture" target="_blank" rel="noopener">github.com/settings/tokens/new</a> (seule la case « gist » cochée, expiration « No expiration »), puis colle-le ici <strong>sur chaque appareil</strong>.</p>
+    <input id="gh" class="inp" type="password" placeholder="ghp_…" value="${esc(S.settings.ghToken)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+    ${S.settings.ghToken ? `<div class="row between" style="gap:10px"><span class="small">${SYNC.busy ? 'Synchronisation…' : SYNC.err ? esc(SYNC.err) : S.lastSync ? 'Dernière synchro : ' + new Date(S.lastSync).toLocaleString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Pas encore synchronisé'}</span><button type="button" class="btn light" style="height:38px;flex-shrink:0" data-a="syncNow" ${SYNC.busy?'disabled':''}>${I.refresh} Synchroniser</button></div>` : ''}
     <label class="label" for="goal" style="margin-top:6px">Objectif de lecture annuel</label>
     <input id="goal" class="inp" type="number" inputmode="numeric" min="0" max="500" value="${esc(S.settings.goal)}">
     <button class="btn block">Enregistrer</button>
@@ -763,11 +854,13 @@ async function addOne(cand, sourceType){
 }
 const A = {
   tab(v){ UI.tab = v; render(); window.scrollTo(0,0); },
-  seg(v){ UI.seg = v; render(); },
-  libGenre(v){ UI.libGenre = v; render(); },
+  seg(v){ UI.seg = v; UI.libGenre = ''; UI.libTag = ''; render(); },
+  libGenre(v){ UI.libGenre = UI.libGenre === v && v ? '' : v; UI.libTag = ''; render(); },
+  libTag(v){ UI.libTag = UI.libTag === v ? '' : v; render(); },
+  seeTag(v){ UI.tab = 'lib'; UI.libGenre = ''; UI.libTag = v; const b = currentBook(); if(b) UI.seg = b.status; closeSheet(); },
   open(v){ SHEET = {kind:'detail', id:v}; renderSheet(); },
   openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip'); SHEET = {kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}; renderSheet(); },
-  close(){ closeSheet(); },
+  close(){ if(SHEET && SHEET.kind === 'import' && SHEET.phase === 'pick'){ S.pending = null; saveLocal(); } closeSheet(); },
   async addCurrent(){
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
     const ref = SHEET.ref; const b = await addOne(SHEET.cand, SHEET.srcType);
@@ -789,14 +882,14 @@ const A = {
     b.status = v;
     if(v === 'reading' && !b.startedAt) b.startedAt = Date.now();
     if(v === 'read'){ if(!b.finishedAt) b.finishedAt = Date.now(); } else b.finishedAt = null;
-    save(); renderSheet();
+    touch(b); save(); renderSheet();
     if(v === 'read') toast('Bravo ! Pense à lui donner une note.');
   },
-  rating(v){ const b = currentBook(); const n = Number(v); b.rating = b.rating === n ? 0 : n; save(); renderSheet(); },
-  spice(v){ const b = currentBook(); const n = Number(v); b.spice = b.spice === n ? null : n; save(); renderSheet(); },
+  rating(v){ const b = currentBook(); const n = Number(v); b.rating = b.rating === n ? 0 : n; touch(b); save(); renderSheet(); },
+  spice(v){ const b = currentBook(); const n = Number(v); const cur = b.spice ?? b.spiceEst ?? 0; b.spice = (cur === n && b.spice != null) ? n - 1 : n; touch(b); save(); renderSheet(); },
   askDel(){ SHEET.confirmDel = true; renderSheet(); },
   cancelDel(){ SHEET.confirmDel = false; renderSheet(); },
-  doDel(){ S.books = S.books.filter(b => b.id !== SHEET.id); save(); closeSheet(); toast('Livre supprimé'); },
+  doDel(){ S.deleted = S.deleted || {}; S.deleted[SHEET.id] = Date.now(); S.books = S.books.filter(b => b.id !== SHEET.id); save(); closeSheet(); toast('Livre supprimé'); },
   openAdd(){ SHEET = {kind:'add', q:'', results:null}; renderSheet(); },
   openSettings(){ SHEET = {kind:'settings', nokey: !S.settings.apiKey}; renderSheet(); },
   pickShot(){ const f = $('#fileShot'); f.value = ''; f.click(); },
@@ -805,11 +898,13 @@ const A = {
   toggleRead(){ UI.hideRead = !UI.hideRead; render(); },
   clearQ(){ UI.q = ''; UI.sResults = null; if(UI.sGenre) loadGenre(); else render(); },
   recommend(v){ recommend(v || ''); },
-  toggleImp(v){ const x = SHEET.items[Number(v)]; if(x && !x.owned){ x.checked = !x.checked; renderSheet(); } },
+  toggleImp(v){ const x = SHEET.items[Number(v)]; if(x && !x.owned){ x.checked = !x.checked; if(S.pending) save(); renderSheet(); } },
+  discardImp(){ S.pending = null; save(); closeSheet(); },
   async confirmImp(){
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
     const picks = SHEET.items.filter(x => x.checked).map(x => x.cand);
     const added = await addCandidates(picks, SHEET.source);
+    S.pending = null; save();
     SHEET = null; renderSheet(); UI.tab = 'lib'; UI.seg = 'toread'; render();
     if(added.length) toast(plural(added.length, 'livre') + ' ' + (added.length>1?'ajoutés':'ajouté') + ' à ta liste');
   },
@@ -834,11 +929,12 @@ const A = {
     SHEET.busy = true; renderSheet();
     try{
       const [e] = await enrichBooks([Object.assign({desc:'', categories:[]}, b, {desc:b.summary||''})]);
-      Object.assign(b, {title:e.title, author:e.author, series:e.series, tome:e.tome, seriesTotal:e.seriesTotal, genre:e.genre, tags:e.tags, summary:e.summary, spiceEst:e.spiceEst, enriched:true});
+      Object.assign(b, {title:e.title, author:e.author, series:e.series, tome:e.tome, seriesTotal:e.seriesTotal, genre:e.genre, tags:e.tags, summary:e.summary, spiceEst:e.spiceEst, enriched:true}); touch(b);
       save(); toast('Fiche complétée');
     }catch(err){ toast(err.message); }
     if(SHEET) SHEET.busy = false; renderSheet(); render();
   },
+  syncNow(){ syncNow(true); },
   retryImport(){ if(LAST_INPUT) startImport(LAST_INPUT); },
   importData(){ const f = $('#fileBackup'); f.value = ''; f.click(); },
   async copyLink(){ try{ await navigator.clipboard.writeText(location.origin + location.pathname + '?import='); toast('Adresse copiée'); }catch(e){ toast('Copie impossible, sélectionne l\'adresse à la main.'); } }
@@ -853,7 +949,7 @@ document.addEventListener('change', e => {
   const k = el.dataset.change;
   if(k === 'sSpice'){ UI.sSpice = el.value; loadAIPicks(false); }
   if(k === 'year'){ UI.year = Number(el.value); render(); }
-  if(k === 'genre'){ const b = currentBook(); if(b){ b.genre = el.value; save(); renderSheet(); } }
+  if(k === 'genre'){ const b = currentBook(); if(b){ b.genre = el.value; touch(b); save(); renderSheet(); } }
 });
 document.addEventListener('submit', e => {
   const f = e.target.closest('[data-form]'); if(!f) return; e.preventDefault();
@@ -863,8 +959,11 @@ document.addEventListener('submit', e => {
   if(k === 'addsearch'){ addSearch($('#aq').value.trim()); }
   if(k === 'manual'){ manualAdd($('#mt').value.trim(), $('#ma').value.trim()); }
   if(k === 'settings'){
-    const k = $('#key').value.trim(); if(k !== S.settings.apiKey){ S.settings.apiKey = k; S.settings.aiStatus = ''; } S.settings.goal = Math.max(0, Number($('#goal').value) || 0); save();
+    const k = $('#key').value.trim(); if(k !== S.settings.apiKey){ S.settings.apiKey = k; S.settings.aiStatus = ''; }
+    const gt = $('#gh').value.trim(); const ghChanged = gt !== S.settings.ghToken; if(ghChanged){ S.settings.ghToken = gt; S.settings.gistId = ''; SYNC.key = ''; }
+    S.settings.goal = Math.max(0, Number($('#goal').value) || 0); save();
     const resume = SHEET && SHEET.resume; closeSheet(); toast('Réglages enregistrés');
+    if(ghChanged && S.settings.ghToken) syncNow(true);
     if(resume && hasAI()) startImport(resume);
   }
 });
@@ -1049,7 +1148,13 @@ async function startImport(input){
       }
     }
     if(!cands.length) throw new Error('Aucun livre reconnu sur cette capture. Tu peux l\'ajouter à la main.');
-    SHEET.items = cands.map(c => { const o = findOwned(c.title); return {cand:c, owned:!!o, checked:!o}; });
+    let items = cands.map(c => { const o = findOwned(c.title); return {cand:c, owned:!!o, checked:!o}; });
+    const pend = S.pending && Date.now() - S.pending.at < 20*60000 ? S.pending.items : [];
+    const before = pend.length;
+    pend.forEach(p => { if(!items.some(x => norm(x.cand.title) === norm(p.cand.title))) items.unshift(Object.assign(p, {owned:!!findOwned(p.cand.title)})); });
+    if(before) SHEET.note = (SHEET.note ? SHEET.note + ' ' : '') + 'Les livres de ta capture précédente sont gardés : tu peux enchaîner plusieurs captures avant de valider.';
+    SHEET.items = items;
+    S.pending = {at:Date.now(), items, source:SHEET.source}; save();
     SHEET.phase = 'pick';
   }catch(e){
     SHEET.phase = 'error'; SHEET.error = e.message; SHEET.nokey = !!e.nokey;
@@ -1068,6 +1173,7 @@ function handleLaunch(){
 
 render();
 handleLaunch();
+if(S.settings.ghToken) setTimeout(() => syncNow(false), 800);
 </script>
 </body>
 </html>

@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-title" content="Ma liste">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<title>Ma liste de lecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#111114;--ink2:#3A3A42;--mute:#5F5F68;--line:#EBEBEF;--soft:#F2F2F5;--soft2:#F7F7F9;--accent:#2F5BEA;--spice:#E8590C}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#fff;color:var(--ink);font-family:Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--accent)}
+#view{padding:calc(env(safe-area-inset-top) + 24px) 20px calc(env(safe-area-inset-bottom) + 110px);max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1{margin:0;font-size:32px;font-weight:700;letter-spacing:-.02em}
+h2{margin:0;font-size:18px;font-weight:700;letter-spacing:-.01em}
+p{margin:0}
+.sub{margin-top:4px;font-size:14px;color:var(--mute)}
+.row{display:flex;align-items:center;gap:12px}
+.between{justify-content:space-between}
+.col{display:flex;flex-direction:column;gap:12px}
+.icon-btn{width:44px;height:44px;border-radius:22px;border:none;display:flex;align-items:center;justify-content:center;background:var(--soft);color:var(--ink);flex-shrink:0;padding:0}
+.icon-btn.dark{background:var(--ink);color:#fff}
+.icon-btn.white{background:#fff}
+.seg{display:flex;background:var(--soft);border-radius:12px;padding:4px;gap:4px}
+.seg button{flex:1;height:36px;border:none;border-radius:9px;background:transparent;font-size:14px;font-weight:500;color:var(--mute)}
+.seg button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{height:36px;padding:0 14px;border-radius:999px;border:1px solid #DCDCE2;background:#fff;font-size:14px;font-weight:500;color:var(--ink2);white-space:nowrap}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:600}
+.chip.sm{height:32px;font-size:13px;padding:0 12px}
+.tag{display:inline-flex;align-items:center;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.tag.plain{background:var(--soft);color:var(--ink2);font-weight:500}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.cover{position:relative;border-radius:6px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;align-items:flex-end;padding:8px;color:#fff;font-weight:700;line-height:1.15;flex-shrink:0}
+.cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
+.cover span{position:relative;font-size:10px;overflow:hidden}
+.card{display:flex;gap:14px;padding:12px;border-radius:16px;background:var(--soft2);border:none;text-align:left;width:100%;color:var(--ink)}
+.card .meta{display:flex;flex-direction:column;gap:6px;min-width:0;padding-top:2px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 12px}
+.gitem{display:flex;flex-direction:column;gap:6px;border:none;background:none;padding:0;text-align:left;min-width:0;color:var(--ink)}
+.gitem .cover{aspect-ratio:2/3;width:100%}
+.t1{font-size:12px;font-weight:600;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t2{font-size:11px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.litem{display:flex;gap:14px;padding:12px 0;border:none;border-bottom:1px solid #F0F0F3;align-items:center;width:100%;background:none;text-align:left;color:var(--ink)}
+.litem .meta{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.ttl{font-size:15px;font-weight:600;line-height:1.25}
+.aut{font-size:13px;color:var(--mute)}
+.small{font-size:12px;color:var(--mute)}
+.field{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 6px 0 14px;border-radius:12px;background:var(--soft);color:var(--mute)}
+.field input,.field select{flex:1;border:none;background:transparent;font-size:16px;color:var(--ink);outline:none;min-width:0;height:44px}
+.inp{width:100%;height:46px;border:none;border-radius:12px;background:var(--soft);padding:0 14px;font-size:16px;outline:none}
+.btn{height:46px;padding:0 18px;border:none;border-radius:12px;background:var(--ink);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.light{background:var(--soft);color:var(--ink)}
+.btn.line{background:#fff;color:var(--ink);border:1px solid #DCDCE2}
+.btn.danger{background:#fff;color:#B42318;border:1px solid #F3C7C3}
+.btn.block{width:100%}
+.btn:disabled{opacity:.5}
+.panel{border-radius:16px;background:var(--soft2);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.label{font-size:12px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+.box{border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.empty{padding:28px 18px;text-align:center;color:var(--mute);font-size:14px;line-height:1.5;background:var(--soft2);border-radius:16px;display:flex;flex-direction:column;gap:14px;align-items:center}
+.err{padding:12px 14px;border-radius:12px;background:#FEF3F2;color:#B42318;font-size:14px;line-height:1.4}
+.banner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:#FFF7E8;font-size:13px;color:#7A4A00}
+.banner button{margin-left:auto;border:none;background:none;font-weight:600;color:#7A4A00;padding:6px}
+nav#tabs{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:8px 0 calc(env(safe-area-inset-bottom) + 8px);z-index:10}
+nav#tabs button{border:none;background:none;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;font-weight:500;color:#6E6E78;padding:2px 0;min-height:44px}
+nav#tabs button.on{color:var(--accent);font-weight:600}
+.backdrop{position:fixed;inset:0;background:rgba(17,17,20,.35);z-index:20}
+.pane{position:fixed;left:0;right:0;bottom:0;max-height:92vh;overflow-y:auto;background:#fff;border-radius:20px 20px 0 0;z-index:21;padding:20px 20px calc(env(safe-area-inset-bottom) + 24px);max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:18px;-webkit-overflow-scrolling:touch}
+.full{position:fixed;inset:0;overflow-y:auto;background:#fff;z-index:21;-webkit-overflow-scrolling:touch}
+.full-inner{max-width:640px;margin:0 auto;padding-bottom:calc(env(safe-area-inset-bottom) + 40px)}
+.dhead{background:#F4F1EE;padding:calc(env(safe-area-inset-top) + 16px) 20px 28px;display:flex;flex-direction:column;align-items:center;gap:18px}
+.dbody{padding:24px 20px 0;display:flex;flex-direction:column;gap:22px}
+.spinner{width:22px;height:22px;border:2.5px solid #DCDCE2;border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+.loading{display:flex;align-items:center;gap:12px;padding:18px;border-radius:16px;background:var(--soft2);font-size:14px;color:var(--ink2)}
+@keyframes spin{to{transform:rotate(360deg)}}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 100px);transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:40;max-width:90vw;text-align:center}
+#toast.show{opacity:1}
+.rate{display:flex;gap:0}
+.rate button{border:none;background:none;padding:0;width:40px;height:44px;display:flex;align-items:center;justify-content:center}
+.hero{border-radius:20px;background:var(--ink);color:#fff;padding:20px;display:flex;flex-direction:column;gap:16px}
+.hero .why{font-size:14px;line-height:1.5;color:#E4E4EA}
+.bar{height:8px;border-radius:4px;background:#E3E3E8;overflow:hidden}
+.bar div{height:8px;background:var(--accent);border-radius:4px}
+.stack{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px}
+.months{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px;align-items:end;height:120px}
+.months div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;height:120px}
+.months i{display:block;width:100%;border-radius:4px 4px 0 0;background:var(--accent)}
+.months span{font-size:10px;color:var(--mute)}
+.months b{font-size:10px;font-weight:600;color:var(--ink2)}
+.check{width:24px;height:24px;border-radius:7px;border:1.5px solid #C9C9D1;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff}
+.check.on{background:var(--ink);border-color:var(--ink)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+select.mini{border:none;background:var(--soft);border-radius:10px;height:36px;padding:0 10px;font-size:14px;font-weight:500}
+.grab{width:40px;height:5px;border-radius:3px;background:#DCDCE2;align-self:center;margin-top:-8px}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:var(--soft);padding:10px 12px;border-radius:10px;word-break:break-all}
+</style>
+</head>
+<body>
+<main id="view"></main>
+<nav id="tabs" aria-label="Navigation"></nav>
+<div id="sheet"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fileShot" accept="image/*" class="sr" aria-hidden="true" tabindex="-1">
+<input type="file" id="fileBackup" accept="application/json,.json" class="sr" aria-hidden="true" tabindex="-1">
+<script>
+'use strict';
+/* ============ Constantes ============ */
+const GENRES = ['Romantasy','Fantasy','Romance','Roman','Policier & thriller','Historique','Science-fiction','Feel-good','Non-fiction'];
+const GSTYLE = {
+  'Romantasy':{bg:'#F1E8FD',fg:'#6B2BB0',bar:'#7C3AED'},
+  'Fantasy':{bg:'#E8EEFF',fg:'#2A44B8',bar:'#2F5BEA'},
+  'Romance':{bg:'#FDE8EE',fg:'#A3223F',bar:'#E0457B'},
+  'Roman':{bg:'#E7F4EC',fg:'#22693B',bar:'#2E8B57'},
+  'Policier & thriller':{bg:'#ECECEF',fg:'#3F3F46',bar:'#52525B'},
+  'Historique':{bg:'#FBF0DC',fg:'#7A4E0E',bar:'#B7791F'},
+  'Science-fiction':{bg:'#E0F4F6',fg:'#0E6170',bar:'#0891B2'},
+  'Feel-good':{bg:'#FDEEDF',fg:'#9A4508',bar:'#EA7A2B'},
+  'Non-fiction':{bg:'#EEF0F3',fg:'#4B5563',bar:'#94A3B8'}
+};
+const GENRE_DEF = 'Romantasy = fantasy avec une histoire d\'amour centrale. Fantasy = fantasy sans romance centrale. Romance = histoire d\'amour contemporaine ou autre, sans magie. Roman = littérature générale ou contemporaine. Policier & thriller = polar, enquête, suspense, thriller psychologique. Historique = roman historique. Science-fiction = SF, dystopie. Feel-good = roman doudou, cosy, réconfortant. Non-fiction = essai, biographie, développement personnel, documentaire.';
+const SPICY = new Set(['Romance','Romantasy']);
+const SPICE_BANDS = {'':'Spice : tous','doux':'Doux (0-1)','moyen':'Moyen (2-3)','epice':'Épicé (4-5)'};
+const GEMINI_MODELS = ['gemini-flash-latest','gemini-2.5-flash'];
+const GB_GENRE = {'Romantasy':'romantasy','Fantasy':'subject:fantasy','Romance':'subject:romance','Roman':'subject:"literary fiction"','Policier & thriller':'subject:thriller','Historique':'subject:"historical fiction"','Science-fiction':'subject:"science fiction"','Feel-good':'"feel good" roman','Non-fiction':'subject:biography'};
+const STORE = 'ma-liste-lecture-v1';
+const COVER_COLORS = ['#7A2E1F','#1F3A5F','#3B3B3B','#5C1A1A','#2D4A3E','#4A5568','#0F5257','#8C2F39','#5B1E2D','#7A5C2E'];
+const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+
+const I = {
+  plus:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  back:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>',
+  close:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  search:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  arrow:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  chev:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6E6E78" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+  image:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>',
+  check:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+  insta:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>',
+  refresh:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>',
+  tabLib:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2.5z"/><path d="M4 19.5A2 2 0 0 1 6 21h14"/></svg>',
+  tabSearch:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  tabMe:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>',
+  tabStats:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>'
+};
+const starSVG = (on, size=26) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${on?'#111114':'none'}" stroke="${on?'#111114':'#B8B8C0'}" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z"/></svg>`;
+const pepSVG = (on, size=26) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${on?'#E8590C':'none'}" stroke="${on?'#C2410C':'#B8B8C0'}" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c.5 3 3.5 4.5 3.5 8.5a3.5 3.5 0 0 1-7 0c0-1.6.8-2.6 1.6-3.4C10.6 10 11 11 12 11c0-2.5-1.5-4.5 0-8z"/><path d="M8.6 14.5A5.2 5.2 0 0 0 12 21a5.2 5.2 0 0 0 5.2-5.2"/></svg>`;
+
+/* ============ Données ============ */
+function defaults(){ return {books:[],settings:{apiKey:'',goal:25,aiStatus:'',model:''},recs:[],dislikes:[],curated:{},lastBackup:0}; }
+function loadState(){
+  try{ const s = JSON.parse(localStorage.getItem(STORE)); if(s && Array.isArray(s.books)){ const d=defaults(); return Object.assign(d, s, {settings:Object.assign(d.settings, s.settings||{})}); } }catch(e){}
+  return defaults();
+}
+let S = loadState();
+function save(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){ toast("Impossible d'enregistrer sur cet appareil."); } }
+try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+
+const UI = { tab:'lib', seg:'reading', libGenre:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
+let SHEET = null;   // {kind:'detail'|'add'|'import'|'settings', ...}
+
+/* ============ Utilitaires ============ */
+const $ = (s) => document.querySelector(s);
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function norm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+function colorFor(s){ let h=0; for(const c of String(s)) h=(h*31 + c.charCodeAt(0))>>>0; return COVER_COLORS[h % COVER_COLORS.length]; }
+function findOwned(title){ const n = norm(title); return n ? S.books.find(b => norm(b.title) === n) : null; }
+function similar(a, b){ const A = norm(a).split(' ').filter(w=>w.length>1), B = new Set(norm(b).split(' ')); if(!A.length) return false; return A.filter(w=>B.has(w)).length / A.length >= 0.6; }
+function cleanDesc(d){ return String(d||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim(); }
+function fmtDate(t){ return t ? new Date(t).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : ''; }
+function plural(n, w){ return n + ' ' + w + (n>1?'s':''); }
+let toastT;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'), 2600); }
+function genreTag(g){ const st=GSTYLE[g]; return st ? `<span class="tag" style="background:${st.bg};color:${st.fg}">${esc(g)}</span>` : ''; }
+function seriesLine(b){
+  if(!b.series) return '';
+  let s = 'Série ' + b.series;
+  if(b.tome) s += ' · Tome ' + b.tome + (b.seriesTotal ? ' sur ' + b.seriesTotal : '');
+  return s;
+}
+function guessGenre(c){
+  const cat = norm((c.categories||[]).join(' ') + ' ' + (c.desc||'').slice(0,300));
+  if(/romantasy/.test(cat)) return 'Romantasy';
+  if(/fantasy/.test(cat) && /romance|love/.test(cat)) return 'Romantasy';
+  if(/fantasy/.test(cat)) return 'Fantasy';
+  if(/romance|love stor/.test(cat)) return 'Romance';
+  if(/thriller|mystery|detective|crime|polar|suspense/.test(cat)) return 'Policier & thriller';
+  if(/historical|histori/.test(cat)) return 'Historique';
+  if(/science fiction|dystopi/.test(cat)) return 'Science-fiction';
+  if(/biography|self help|history|psychology|essai|business|cooking|nonfiction|non fiction/.test(cat)) return 'Non-fiction';
+  return 'Roman';
+}
+window.imgErr = function(el){
+  const alt = (el.dataset.alt || '').split('|').filter(Boolean);
+  if(alt.length){ el.dataset.alt = alt.slice(1).join('|'); el.src = alt[0]; } else el.remove();
+};
+window.imgLoad = function(el){ if(el.naturalWidth && el.naturalWidth < 20) imgErr(el); };
+function coverHTML(b, style){
+  const srcs = [];
+  if(b.thumb) srcs.push(b.thumb);
+  if(b.isbn) srcs.push(`https://covers.openlibrary.org/b/isbn/${encodeURIComponent(b.isbn)}-L.jpg?default=false`);
+  const img = srcs.length ? `<img alt="" loading="lazy" src="${esc(srcs[0])}" data-alt="${esc(srcs.slice(1).join('|'))}" onerror="imgErr(this)" onload="imgLoad(this)">` : '';
+  return `<div class="cover" style="background:${colorFor(b.title)};${style||''}"><span>${esc(b.title)}</span>${img}</div>`;
+}
+
+/* ============ Google Books ============ */
+function gbMap(it){
+  const v = it.volumeInfo || {}; const ids = v.industryIdentifiers || [];
+  const isbn = (ids.find(i=>i.type==='ISBN_13') || ids.find(i=>i.type==='ISBN_10') || {}).identifier || '';
+  let thumb = (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || '';
+  thumb = thumb.replace(/^http:/,'https:').replace('&edge=curl','');
+  return { gid:it.id, title:v.title||'', author:(v.authors||[]).join(', '), desc:cleanDesc(v.description), categories:v.categories||[], isbn, thumb, pages:v.pageCount||null, year:(v.publishedDate||'').slice(0,4), lang:v.language||'' };
+}
+async function gbSearch(q, max){
+  const url = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(q) + '&maxResults=' + (max||20) + '&printType=books';
+  const r = await fetch(url);
+  if(!r.ok) throw new Error('La recherche Google Books ne répond pas (' + r.status + ').');
+  const j = await r.json();
+  return (j.items || []).map(gbMap).filter(x => x.title);
+}
+async function gbFind(title, author){
+  let res = [];
+  try{ res = await gbSearch('intitle:"' + title + '"' + (author ? ' inauthor:"' + author.split(',')[0] + '"' : ''), 6); }catch(e){}
+  if(!res.length){ try{ res = await gbSearch(title + ' ' + (author||''), 6); }catch(e){} }
+  res = res.filter(r => similar(title, r.title));
+  return res.find(r => r.thumb && r.desc) || res.find(r => r.thumb) || res[0] || null;
+}
+function baseCand(title, author){ return {title, author:author||'', desc:'', categories:[], isbn:'', thumb:'', pages:null, year:''}; }
+async function lookup(title, author){
+  const g = await gbFind(title, author).catch(()=>null);
+  return g ? Object.assign(g, {title: title, author: author || g.author}) : baseCand(title, author);
+}
+
+/* ============ IA (Gemini) ============ */
+function hasAI(){ return !!(S.settings.apiKey||'').trim() && S.settings.aiStatus !== 'blocked'; }
+async function ai({system, text, image, max_tokens}){
+  const key = (S.settings.apiKey || '').trim();
+  if(!key){ const e = new Error('Ajoute ta clé Gemini gratuite dans les réglages (roue crantée) pour utiliser l\'IA.'); e.nokey = true; throw e; }
+  const parts = [];
+  if(image) parts.push({inline_data:{mime_type:image.type, data:image.data}});
+  parts.push({text});
+  const body = JSON.stringify({systemInstruction:{parts:[{text:system}]}, contents:[{role:'user', parts}], generationConfig:{responseMimeType:'application/json', maxOutputTokens:Math.max(8192, max_tokens||0), temperature:0.4}});
+  const models = [...new Set([S.settings.model].filter(Boolean).concat(GEMINI_MODELS))];
+  let lastErr = null;
+  for(const m of models){
+    let r;
+    try{ r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent', {method:'POST', headers:{'content-type':'application/json','x-goog-api-key':key}, body}); }
+    catch(e){ throw new Error('Pas de connexion à l\'IA. Vérifie ton réseau.'); }
+    if(r.ok){
+      const j = await r.json();
+      if(S.settings.model !== m || S.settings.aiStatus){ S.settings.model = m; S.settings.aiStatus = ''; save(); }
+      const c = j.candidates && j.candidates[0];
+      const t = c && c.content && (c.content.parts || []).map(p => p.text || '').join('');
+      if(!t) throw new Error('L\'IA n\'a pas répondu, réessaie.');
+      return t;
+    }
+    let msg = ''; try{ msg = (await r.json()).error.message || ''; }catch(e){}
+    if(r.status === 404){ lastErr = new Error('Modèle Gemini introuvable.'); continue; }
+    if(/location is not supported|not available in your country|free tier is not available|enable billing/i.test(msg)){
+      S.settings.aiStatus = 'blocked'; save();
+      const e = new Error('Gemini gratuit n\'est pas disponible depuis ton pays : l\'app passe en mode sans IA.'); e.blocked = true; throw e;
+    }
+    if(r.status === 403 || /api key/i.test(msg)) throw new Error('Clé Gemini refusée : vérifie-la dans les réglages.');
+    if(r.status === 429) throw new Error('Limite gratuite de Gemini atteinte pour le moment, réessaie un peu plus tard.');
+    throw new Error('Erreur de l\'IA (' + r.status + ') ' + msg);
+  }
+  throw lastErr || new Error('IA indisponible.');
+}
+function parseJSON(t){
+  const a = t.indexOf('{'), b = t.indexOf('[');
+  const start = a < 0 ? b : (b < 0 ? a : Math.min(a, b));
+  const end = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'));
+  if(start < 0 || end < start) throw new Error('Réponse de l\'IA illisible, réessaie.');
+  return JSON.parse(t.slice(start, end + 1));
+}
+async function extractBooks({text, image}){
+  const system = 'Tu reçois une capture d\'écran Instagram (texte extrait par OCR, ou image) où quelqu\'un recommande des livres. Liste chaque livre recommandé. Ignore l\'interface d\'Instagram (pseudos, likes, commentaires, boutons, musique, hashtags qui ne sont pas des titres). Corrige les fautes d\'OCR évidentes et écris le titre tel qu\'il est publié. Si l\'auteur n\'est pas visible mais que tu le connais avec certitude, indique-le ; sinon chaîne vide. Réponds uniquement en JSON : {"books":[{"title":"","author":""}]} ; s\'il n\'y a aucun livre : {"books":[]}.';
+  const out = await ai({system, image, text: text ? 'Texte extrait de la capture :\n"""\n' + text.slice(0, 6000) + '\n"""' : 'Voici la capture.'});
+  const seen = new Set();
+  return (parseJSON(out).books || []).filter(b => b && b.title && !seen.has(norm(b.title)) && seen.add(norm(b.title)));
+}
+async function enrichBooks(cands){
+  const system = 'Tu es une libraire experte. Pour chaque livre reçu, donne des informations fiables en français. Genre : exactement un parmi ' + GENRES.join(', ') + '. Définitions : ' + GENRE_DEF + ' Spice = intensité des scènes de sexe, de 0 (aucune) à 5 (très explicite), seulement pour Romance et Romantasy, sinon null. Si tu n\'es pas sûre d\'une info de série, mets null. Réponds uniquement en JSON, dans le même ordre que l\'entrée : {"books":[{"title":"","author":"","series":null,"tome":null,"seriesTotal":null,"genre":"","tags":[""],"summary":"","spice":null}]}';
+  const items = cands.map((c, i) => ({n:i+1, title:c.title, author:c.author, categories:c.categories, description:(c.desc||'').slice(0,1200)}));
+  const text = 'Livres :\n' + JSON.stringify(items) + '\n\n"title" : le titre tel que publié (corrige seulement les erreurs). "series" : nom de la série ou null. "tome" : numéro du livre dans la série. "seriesTotal" : nombre total de tomes parus ou prévus. "tags" : 2 ou 3 mots-clés courts (thèmes ou tropes, ex. "Dragons", "Enemies to lovers", "Huis clos"). "summary" : 3 à 4 phrases en français, sans spoiler.';
+  const out = await ai({system, text, max_tokens: 1000 + cands.length * 600});
+  const arr = parseJSON(out).books || [];
+  return cands.map((c, i) => {
+    const e = arr[i] || {};
+    return Object.assign({}, c, {
+      title: e.title || c.title, author: e.author || c.author,
+      series: e.series || '', tome: Number(e.tome) || null, seriesTotal: Number(e.seriesTotal) || null,
+      genre: GENRES.includes(e.genre) ? e.genre : (c.genre || guessGenre(c)),
+      tags: Array.isArray(e.tags) ? e.tags.filter(Boolean).slice(0,3) : [],
+      summary: e.summary || c.desc.slice(0,600),
+      spiceEst: typeof e.spice === 'number' ? e.spice : (c.spiceEst ?? null)
+    });
+  });
+}
+function makeBook(c, source, status){
+  return { id:uid(), title:c.title, author:c.author||'', series:c.series||'', tome:c.tome||null, seriesTotal:c.seriesTotal||null,
+    genre:c.genre||guessGenre(c), tags:c.tags||[], summary:c.summary||(c.desc||'').slice(0,600), spiceEst:c.spiceEst ?? null, spice:null, rating:0,
+    status:status||'toread', isbn:c.isbn||'', thumb:c.thumb||'', gid:c.gid||'', pages:c.pages||null, year:c.year||'',
+    source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
+}
+async function addCandidates(cands, source){
+  cands = cands.filter(c => !findOwned(c.title));
+  if(!cands.length){ toast('Déjà dans ta liste.'); return []; }
+  let rich = cands;
+  if(hasAI()){
+    try{ rich = await enrichBooks(cands); }catch(e){ toast('Ajouté sans les infos de l\'IA : ' + e.message); }
+  }
+  const added = rich.map(c => makeBook(c, source));
+  S.books.unshift(...added); save();
+  return added;
+}
+
+/* ============ Images ============ */
+function fileToImage(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => {
+      const max = 1568; let w = img.naturalWidth, h = img.naturalHeight; const k = Math.min(1, max / Math.max(w, h));
+      const cv = document.createElement('canvas'); cv.width = Math.round(w*k); cv.height = Math.round(h*k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+      resolve({type:'image/jpeg', data: cv.toDataURL('image/jpeg', 0.85).split(',')[1]});
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image illisible.')); };
+    img.src = url;
+  });
+}
+
+/* ============ Rendu : onglets ============ */
+function renderTabs(){
+  const tabs = [['lib','Bibliothèque',I.tabLib],['search','Recherche',I.tabSearch],['me','Pour moi',I.tabMe],['stats','Stats',I.tabStats]];
+  $('#tabs').innerHTML = tabs.map(([k,l,ic]) => `<button data-a="tab" data-v="${k}" class="${UI.tab===k?'on':''}" ${UI.tab===k?'aria-current="page"':''}>${ic}${l}</button>`).join('');
+}
+function render(){
+  renderTabs();
+  const v = $('#view');
+  v.innerHTML = UI.tab==='lib' ? viewLib() : UI.tab==='search' ? viewSearch() : UI.tab==='me' ? viewMe() : viewStats();
+}
+
+function viewLib(){
+  const by = s => S.books.filter(b => b.status === s);
+  const reading = by('reading'), toread = by('toread'), read = by('read').sort((a,b) => (b.finishedAt||0) - (a.finishedAt||0));
+  const seg = UI.seg;
+  let list = seg==='reading' ? reading : seg==='toread' ? toread : read;
+  const present = GENRES.filter(g => list.some(b => b.genre === g));
+  if(UI.libGenre && !present.includes(UI.libGenre)) UI.libGenre = '';
+  if(UI.libGenre) list = list.filter(b => b.genre === UI.libGenre);
+  const needBackup = S.books.length >= 3 && Date.now() - (S.lastBackup||0) > 30*86400000;
+  let body;
+  if(!S.books.length){
+    body = `<div class="empty"><strong style="color:var(--ink);font-size:16px">Ta liste est vide</strong>Tape deux fois au dos de ton iPhone sur une vidéo Instagram, ou ajoute un livre avec le bouton +.<button class="btn" data-a="openAdd">${I.plus} Ajouter un livre</button></div>`;
+  } else if(!list.length){
+    body = `<div class="empty">${seg==='reading' ? 'Aucune lecture en cours. Ouvre un livre de ta liste et passe-le « En cours ».' : seg==='toread' ? 'Rien à lire pour l\'instant.' : 'Aucun livre terminé pour l\'instant.'}</div>`;
+  } else if(seg === 'reading'){
+    body = `<div class="col">${list.map(b => `
+      <button class="card" data-a="open" data-v="${b.id}">
+        ${coverHTML(b,'width:72px;height:108px')}
+        <div class="meta"><span style="font-size:16px;font-weight:600;line-height:1.25">${esc(b.title)}</span><span class="aut">${esc(b.author)}</span>${b.series?`<span class="small">${esc(seriesLine(b))}</span>`:''}<span>${genreTag(b.genre)}</span></div>
+      </button>`).join('')}</div>`;
+  } else {
+    body = `<div class="grid3">${list.map(b => `
+      <button class="gitem" data-a="open" data-v="${b.id}">${coverHTML(b)}<span class="t1">${esc(b.title)}</span><span class="t2">${seg==='read' && b.rating ? '★ ' + b.rating + ' · ' : ''}${esc(b.author)}</span></button>`).join('')}</div>`;
+  }
+  return `
+  <div class="row between">
+    <div><h1>Bibliothèque</h1><p class="sub">${reading.length} en cours · ${toread.length} à lire · ${read.length} ${read.length>1?'lus':'lu'}</p></div>
+    <div class="row" style="gap:8px"><button class="icon-btn" data-a="openSettings" aria-label="Réglages">${I.gear}</button><button class="icon-btn dark" data-a="openAdd" aria-label="Ajouter un livre">${I.plus}</button></div>
+  </div>
+  ${needBackup ? `<div class="banner">Pense à sauvegarder ta liste de temps en temps.<button data-a="exportData">Sauvegarder</button></div>` : ''}
+  ${!S.settings.apiKey && !S.settings.noAI ? `<div class="banner">Active l'IA gratuite (Gemini) pour les résumés, le spice et les recos.<button data-a="openSettings">Réglages</button></div>` : ''}
+  <div class="seg" role="tablist">
+    <button class="${seg==='reading'?'on':''}" data-a="seg" data-v="reading">En cours</button>
+    <button class="${seg==='toread'?'on':''}" data-a="seg" data-v="toread">À lire</button>
+    <button class="${seg==='read'?'on':''}" data-a="seg" data-v="read">Lus</button>
+  </div>
+  ${present.length > 1 && seg !== 'reading' ? `<div class="chips"><button class="chip sm ${!UI.libGenre?'on':''}" data-a="libGenre" data-v="">Tous</button>${present.map(g => `<button class="chip sm ${UI.libGenre===g?'on':''}" data-a="libGenre" data-v="${esc(g)}">${esc(g)}</button>`).join('')}</div>` : ''}
+  ${body}`;
+}
+
+function viewSearch(){
+  const g = UI.sGenre, spicy = SPICY.has(g);
+  let body = '';
+  if(UI.sLoading) body = `<div class="loading"><div class="spinner"></div>${UI.q || !hasAI() ? 'Recherche en cours…' : 'L\'IA prépare une sélection…'}</div>`;
+  else if(UI.sError) body = `<div class="err">${esc(UI.sError)}</div>`;
+  else if(UI.sResults){
+    let res = UI.sResults;
+    if(!UI.q && UI.sSpice) res = res.filter(r => r.spiceEst == null || inBand(r.spiceEst, UI.sSpice));
+    body = res.length ? `<div>${res.map((r,i) => resultRow(r, 'res', i)).join('')}</div>` : `<div class="empty">Aucun résultat.</div>`;
+  } else body = `<div class="empty">Cherche un titre, un auteur ou une série,<br>ou choisis un genre pour découvrir une sélection.</div>`;
+  return `
+  <h1>Recherche</h1>
+  <form class="field" data-form="search" role="search">${I.search}<label class="sr" for="q">Rechercher un titre ou un auteur</label><input id="q" type="search" enterkeyhint="search" placeholder="Titre, auteur, série…" value="${esc(UI.q)}" autocomplete="off"></form>
+  <div class="panel">
+    <span class="label">Genre</span>
+    <div class="chips"><button class="chip ${!g?'on':''}" data-a="sGenre" data-v="">Tous</button>${GENRES.map(x => `<button class="chip ${g===x?'on':''}" data-a="sGenre" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+  </div>
+  ${(spicy || (!UI.q && g)) ? `<div class="row between">
+     <span class="small">${UI.q ? '' : g ? 'Sélection ' + esc(g) : ''}</span>
+     <div class="row" style="gap:8px">${spicy && !UI.q ? `<label class="sr" for="spice">Niveau de spice</label><select id="spice" class="mini" data-change="sSpice">${Object.entries(SPICE_BANDS).map(([k,l]) => `<option value="${k}" ${UI.sSpice===k?'selected':''}>${l}</option>`).join('')}</select>` : ''}
+     ${!UI.q && g ? `<button class="icon-btn" style="width:36px;height:36px" data-a="refreshCurated" aria-label="Nouvelle sélection">${I.refresh}</button>` : ''}</div>
+   </div>` : ''}
+  ${body}`;
+}
+function inBand(v, band){ return band==='doux' ? v <= 1 : band==='moyen' ? (v >= 2 && v <= 3) : band==='epice' ? v >= 4 : true; }
+function resultRow(r, list, i){
+  const owned = findOwned(r.title);
+  return `<div class="litem">
+    <button data-a="openCand" data-v="${list}:${i}" style="display:flex;gap:14px;align-items:center;flex:1;min-width:0;border:none;background:none;padding:0;text-align:left;color:var(--ink)">
+      ${coverHTML(r,'width:56px;height:84px')}
+      <div class="meta"><span class="ttl">${esc(r.title)}</span><span class="aut">${esc(r.author)}${r.series ? ' · ' + esc(r.series) + (r.tome ? ' T' + r.tome : '') : r.year ? ' · ' + esc(r.year) : ''}</span>
+      ${r.spiceEst != null && SPICY.has(r.genre || UI.sGenre) ? `<span class="row small" style="gap:4px">${pepSVG(true,14)} ${r.spiceEst}/5 · estimé par l'IA</span>` : ''}</div>
+    </button>
+    ${owned ? `<span class="small" style="flex-shrink:0">Dans ta liste</span>` : `<button class="icon-btn white" style="border:1px solid #DCDCE2" data-a="addCand" data-v="${list}:${i}" aria-label="Ajouter ${esc(r.title)} à ma liste">${I.plus}</button>`}
+  </div>`;
+}
+
+function viewMe(){
+  const rated = S.books.filter(b => b.rating > 0).length;
+  const recs = S.recs || [];
+  const hero = recs[0], rest = recs.slice(1);
+  const asks = ['Une romantasy, spice 3 max','Un roman court','Une série terminée','Comme mon dernier coup de cœur','Un polar qui tient en haleine'];
+  let main;
+  if(UI.recLoading) main = `<div class="loading"><div class="spinner"></div>Recherche de tes prochaines lectures…</div>`;
+  else if(UI.recError) main = `<div class="err">${esc(UI.recError)}</div>`;
+  else if(!hero) main = `<div class="empty">${rated ? 'Prête pour des recommandations ?' : 'Note quelques livres lus pour des recommandations vraiment personnalisées. Tu peux déjà essayer.'}<button class="btn" data-a="recommend">Me recommander des livres</button></div>`;
+  else main = `
+    <div class="hero">
+      <div class="row between"><span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#B9C6FF">Ta prochaine lecture</span>${hero.ask ? `<span style="font-size:12px;color:#C9C9D1">${esc(hero.ask)}</span>` : ''}</div>
+      <button data-a="openCand" data-v="rec:0" style="display:flex;gap:16px;border:none;background:none;padding:0;text-align:left;color:#fff">
+        ${coverHTML(hero,'width:84px;height:126px;box-shadow:0 6px 16px rgba(0,0,0,.4)')}
+        <div class="col" style="gap:6px;min-width:0"><span style="font-size:19px;font-weight:700;line-height:1.2">${esc(hero.title)}</span><span style="font-size:14px;color:#C9C9D1">${esc(hero.author)}</span><span>${genreTag(hero.genre)}</span>
+        ${hero.spiceEst != null && SPICY.has(hero.genre) ? `<span class="row" style="gap:4px;font-size:12px;color:#C9C9D1">${pepSVG(true,14)} ${hero.spiceEst}/5 estimé</span>` : ''}</div>
+      </button>
+      ${hero.why ? `<p class="why">${esc(hero.why)}</p>` : ''}
+      <div class="row" style="gap:10px"><button class="btn block" style="background:#fff;color:var(--ink);flex:1" data-a="addCand" data-v="rec:0">Ajouter à ma liste</button><button class="icon-btn" style="background:transparent;border:1px solid #3A3A42;color:#fff;border-radius:12px" data-a="dislike" data-v="0" aria-label="Pas pour moi">${I.close}</button></div>
+    </div>
+    ${rest.length ? `<div><h2 style="margin-bottom:6px">Aussi pour toi</h2>${rest.map((r, k) => `
+      <div class="litem" style="align-items:flex-start">
+        <button data-a="openCand" data-v="rec:${k+1}" style="display:flex;gap:14px;flex:1;min-width:0;border:none;background:none;padding:0;text-align:left;color:var(--ink)">
+          ${coverHTML(r,'width:52px;height:78px')}
+          <div class="meta"><span class="ttl">${esc(r.title)}</span><span class="aut">${esc(r.author)}</span><span style="font-size:13px;line-height:1.4;color:var(--ink2)">${esc(r.why)}</span></div>
+        </button>
+        <div class="col" style="gap:6px"><button class="icon-btn white" style="border:1px solid #DCDCE2" data-a="addCand" data-v="rec:${k+1}" aria-label="Ajouter ${esc(r.title)}">${I.plus}</button><button class="icon-btn white" data-a="dislike" data-v="${k+1}" aria-label="Pas pour moi">${I.close}</button></div>
+      </div>`).join('')}</div>` : ''}`;
+  return `
+  <div><h1>Pour moi</h1><p class="sub">${rated ? 'D\'après ' + plural(rated, 'livre') + ' noté' + (rated>1?'s':'') : 'Note tes lectures pour affiner les recos'}</p></div>
+  ${main}
+  <div class="col" style="gap:10px">
+    <h2>J'ai envie de…</h2>
+    <div class="chips">${asks.map(a => `<button class="chip" data-a="recommend" data-v="${esc(a)}" ${UI.recLoading?'disabled':''}>${esc(a)}</button>`).join('')}</div>
+    <form class="field" data-form="ask"><label class="sr" for="ask">Demander une recommandation</label><input id="ask" type="text" enterkeyhint="send" placeholder="Ou demande ce que tu veux…" autocomplete="off"><button class="icon-btn" style="width:36px;height:36px;border-radius:10px;background:var(--accent);color:#fff" aria-label="Envoyer">${I.arrow}</button></form>
+    ${hero && !UI.recLoading ? `<button class="btn line" data-a="recommend">${I.refresh} Nouvelles recommandations</button>` : ''}
+  </div>`;
+}
+
+function viewStats(){
+  const y = UI.year;
+  const years = [...new Set(S.books.filter(b => b.finishedAt).map(b => new Date(b.finishedAt).getFullYear()).concat([new Date().getFullYear()]))].sort((a,b) => b-a);
+  const read = S.books.filter(b => b.status==='read' && b.finishedAt && new Date(b.finishedAt).getFullYear() === y);
+  const goal = Number(S.settings.goal) || 0;
+  const rated = read.filter(b => b.rating > 0);
+  const avg = rated.length ? (rated.reduce((s,b) => s + b.rating, 0) / rated.length) : null;
+  const sp = read.filter(b => SPICY.has(b.genre) && b.spice != null);
+  const avgSp = sp.length ? sp.reduce((s,b) => s + b.spice, 0) / sp.length : null;
+  const byG = GENRES.map(g => ({g, n: read.filter(b => b.genre === g).length})).filter(x => x.n);
+  const months = Array(12).fill(0); read.forEach(b => months[new Date(b.finishedAt).getMonth()]++);
+  const mx = Math.max(1, ...months);
+  const pages = read.reduce((s,b) => s + (b.pages||0), 0);
+  const f = n => n == null ? '–' : n.toFixed(1).replace('.', ',');
+  return `
+  <div class="row between"><h1>Stats</h1>
+    <label class="sr" for="year">Année</label><select id="year" class="mini" data-change="year">${years.map(v => `<option value="${v}" ${v===y?'selected':''}>${v}</option>`).join('')}</select></div>
+  <div class="panel" style="padding:20px;border-radius:20px;gap:12px">
+    <div class="row" style="align-items:baseline;gap:8px"><span style="font-size:52px;font-weight:700;letter-spacing:-.03em;line-height:1">${read.length}</span><span style="font-size:16px;color:var(--ink2)">${read.length>1?'livres lus':'livre lu'} en ${y}</span></div>
+    ${goal ? `<div class="bar"><div style="width:${Math.min(100, Math.round(read.length/goal*100))}%"></div></div>
+    <span class="small" style="font-size:13px">Objectif : ${goal} livres · ${read.length >= goal ? 'atteint, bravo !' : 'encore ' + (goal - read.length)}</span>` : ''}
+  </div>
+  <div class="grid3" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+    <div class="box" style="gap:6px"><span class="label">Note moyenne</span><span style="font-size:26px;font-weight:700">${f(avg)}<span style="font-size:15px;font-weight:500;color:var(--mute)"> / 5</span></span></div>
+    <div class="box" style="gap:6px"><span class="label">Spice moyen</span><span style="font-size:26px;font-weight:700">${f(avgSp)}<span style="font-size:15px;font-weight:500;color:var(--mute)"> / 5</span></span></div>
+  </div>
+  ${pages ? `<div class="box" style="gap:6px"><span class="label">Pages lues</span><span style="font-size:26px;font-weight:700">${pages.toLocaleString('fr-FR')}</span></div>` : ''}
+  <div class="box"><h2 style="font-size:15px">Par genre</h2>
+    ${byG.length ? `<div class="stack">${byG.map(x => `<div style="flex:${x.n};background:${GSTYLE[x.g].bar}"></div>`).join('')}</div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px">${byG.map(x => `<div class="row" style="gap:8px"><span style="width:10px;height:10px;border-radius:3px;background:${GSTYLE[x.g].bar};flex-shrink:0"></span><span style="font-size:14px;flex:1">${esc(x.g)}</span><span style="font-size:14px;font-weight:600">${x.n}</span></div>`).join('')}</div>` : `<p class="small" style="font-size:14px">Les genres apparaîtront quand tu auras terminé des livres.</p>`}
+  </div>
+  <div class="box"><h2 style="font-size:15px">Livres lus par mois</h2>
+    <div class="months" role="img" aria-label="Livres lus par mois en ${y}">${months.map((n,i) => `<div>${n?`<b>${n}</b>`:''}<i style="height:${n ? Math.round(n/mx*80) : 2}px;${n?'':'background:#E3E3E8'}"></i><span>${MONTHS[i]}</span></div>`).join('')}</div>
+  </div>`;
+}
+
+/* ============ Feuilles ============ */
+function renderSheet(){
+  const el = $('#sheet');
+  if(!SHEET){ el.innerHTML = ''; document.body.style.overflow = ''; return; }
+  document.body.style.overflow = 'hidden';
+  if(SHEET.kind === 'detail'){ el.innerHTML = `<div class="full" role="dialog" aria-modal="true" aria-label="Fiche livre"><div class="full-inner">${sheetDetail()}</div></div>`; return; }
+  const inner = SHEET.kind==='add' ? sheetAdd() : SHEET.kind==='import' ? sheetImport() : sheetSettings();
+  el.innerHTML = `<div class="backdrop" data-a="close"></div><div class="pane" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
+}
+function closeSheet(){ SHEET = null; renderSheet(); render(); }
+function sheetHead(title){ return `<div class="row between"><h2 style="font-size:20px">${title}</h2><button class="icon-btn" data-a="close" aria-label="Fermer">${I.close}</button></div>`; }
+
+function currentBook(){
+  if(SHEET.id) return S.books.find(b => b.id === SHEET.id);
+  return SHEET.cand;
+}
+function sheetDetail(){
+  const b = currentBook(); if(!b) return '';
+  const owned = !!SHEET.id;
+  const already = !owned && findOwned(b.title);
+  const st = b.status;
+  const showSpice = SPICY.has(b.genre);
+  const rateRow = (kind, val) => `<div class="rate" role="group" aria-label="${kind==='rating'?'Ma note':'Spice'}">${[1,2,3,4,5].map(n => `<button data-a="${kind}" data-v="${n}" aria-label="${n} sur 5" aria-pressed="${n<=val}">${kind==='rating' ? starSVG(n<=val) : pepSVG(n<=val)}</button>`).join('')}</div>`;
+  const src = b.source || {};
+  return `
+  <div class="dhead">
+    <div class="row between" style="align-self:stretch"><button class="icon-btn white" data-a="close" aria-label="Retour">${I.back}</button>${owned ? '' : ''}</div>
+    ${coverHTML(b,'width:150px;height:225px;border-radius:8px;box-shadow:0 12px 30px rgba(60,20,10,.3);padding:14px')}
+  </div>
+  <div class="dbody">
+    <div class="col" style="gap:6px">
+      <h1 style="font-size:26px">${esc(b.title)}</h1>
+      <p style="font-size:16px;color:var(--ink2)">${esc(b.author)}</p>
+      ${b.series ? `<p style="font-size:14px;color:var(--mute)">${esc(seriesLine(b))}</p>` : ''}
+      ${(b.year || b.pages) ? `<p class="small">${[b.year, b.pages ? b.pages + ' pages' : ''].filter(Boolean).join(' · ')}</p>` : ''}
+      <div class="tags" style="margin-top:6px">${genreTag(b.genre)}${(b.tags||[]).map(t => `<span class="tag plain">${esc(t)}</span>`).join('')}</div>
+    </div>
+    ${owned ? `
+      <div class="seg">
+        <button class="${st==='toread'?'on':''}" data-a="status" data-v="toread">À lire</button>
+        <button class="${st==='reading'?'on':''}" data-a="status" data-v="reading">En cours</button>
+        <button class="${st==='read'?'on':''}" data-a="status" data-v="read">Lu</button>
+      </div>
+      <div style="display:grid;grid-template-columns:${showSpice?'repeat(2,minmax(0,1fr))':'1fr'};gap:12px">
+        <div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Ma note</span>${rateRow('rating', b.rating||0)}</div>
+        ${showSpice ? `<div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Spice${b.spice==null && b.spiceEst!=null ? ' · IA : ' + b.spiceEst : ''}</span>${rateRow('spice', b.spice ?? 0)}</div>` : ''}
+      </div>` : `
+      ${already ? `<div class="panel" style="flex-direction:row;align-items:center">Ce livre est déjà dans ta liste.<button class="btn light" style="margin-left:auto;height:38px" data-a="open" data-v="${already.id}">Voir</button></div>` :
+      `<button class="btn block" data-a="addCurrent" ${SHEET.busy?'disabled':''}>${SHEET.busy ? '<div class="spinner" style="border-top-color:#fff;border-color:#555"></div> Ajout…' : I.plus + ' Ajouter à ma liste'}</button>`}
+      ${b.spiceEst != null && showSpice ? `<p class="row small" style="gap:6px;font-size:13px">${pepSVG(true,16)} Spice estimé par l'IA : ${b.spiceEst}/5</p>` : ''}
+      ${b.why ? `<div class="panel"><span class="label">Pourquoi pour toi</span><p style="font-size:14px;line-height:1.5">${esc(b.why)}</p></div>` : ''}`}
+    ${(b.summary || b.desc) ? `<div class="col" style="gap:8px"><h2 style="font-size:17px">Résumé</h2><p style="font-size:15px;line-height:1.55;color:var(--ink2)">${esc(b.summary || (b.desc||'').slice(0,900))}</p></div>` : ''}
+    ${owned ? `
+      <div class="col" style="gap:10px"><h2 style="font-size:17px">Recommandé par</h2>
+        ${src.url ? `<a href="${esc(src.url)}" target="_blank" rel="noopener" class="card" style="align-items:center;text-decoration:none">` : `<div class="card" style="align-items:center">`}
+          <div class="icon-btn" style="border-radius:10px;background:#E9E9EE">${src.type==='manuel' ? I.plus : src.type==='ia' ? I.tabMe : src.type==='recherche' ? I.search : I.insta}</div>
+          <div class="col" style="gap:2px;flex:1"><span style="font-size:14px;font-weight:600">${src.type==='manuel' ? 'Ajout manuel' : src.type==='ia' ? 'Recommandation de l\'IA' : src.type==='recherche' ? 'Recherche' : 'Vidéo Instagram'}</span><span class="small">Ajouté le ${fmtDate(b.addedAt)}${src.type==='capture'||src.type==='instagram' ? ' · via capture' : ''}</span></div>
+          ${src.url ? I.chev + '</a>' : '</div>'}
+        ${b.finishedAt ? `<p class="small">Terminé le ${fmtDate(b.finishedAt)}</p>` : b.startedAt ? `<p class="small">Commencé le ${fmtDate(b.startedAt)}</p>` : ''}
+      </div>
+      <div class="col" style="gap:8px"><label class="label" for="genreSel">Genre</label>
+        <select id="genreSel" class="inp" data-change="genre">${GENRES.map(g => `<option ${g===b.genre?'selected':''}>${esc(g)}</option>`).join('')}</select></div>
+      ${SHEET.confirmDel ? `<div class="panel"><p style="font-size:14px">Supprimer « ${esc(b.title)} » de ta liste ?</p><div class="row"><button class="btn light" style="flex:1" data-a="cancelDel">Annuler</button><button class="btn" style="flex:1;background:#B42318" data-a="doDel">Supprimer</button></div></div>`
+        : `<button class="btn danger block" data-a="askDel">Supprimer de ma liste</button>`}` : ''}
+  </div>`;
+}
+
+function sheetAdd(){
+  const A = SHEET;
+  let res = '';
+  if(A.loading) res = `<div class="loading"><div class="spinner"></div>Recherche…</div>`;
+  else if(A.error) res = `<div class="err">${esc(A.error)}</div>`;
+  else if(A.results) res = A.results.length ? `<div>${A.results.map((r,i) => resultRow(r,'add',i)).join('')}</div>` : `<div class="empty">Aucun résultat. Tu peux l'ajouter à la main ci-dessous.</div>`;
+  return `${sheetHead('Ajouter un livre')}
+  <form class="field" data-form="addsearch">${I.search}<label class="sr" for="aq">Titre ou auteur</label><input id="aq" type="search" enterkeyhint="search" placeholder="Titre ou auteur…" value="${esc(A.q||'')}" autocomplete="off"></form>
+  ${res}
+  <button class="btn line block" data-a="pickShot">${I.image} Depuis une capture d'écran</button>
+  <form class="col" style="gap:10px" data-form="manual">
+    <span class="label">Ou à la main</span>
+    <label class="sr" for="mt">Titre</label><input id="mt" class="inp" placeholder="Titre" autocomplete="off" required>
+    <label class="sr" for="ma">Auteur</label><input id="ma" class="inp" placeholder="Auteur (facultatif)" autocomplete="off">
+    <button class="btn block" ${A.busy?'disabled':''}>${A.busy ? 'Ajout…' : 'Ajouter'}</button>
+  </form>`;
+}
+
+function sheetImport(){
+  const M = SHEET;
+  if(M.phase === 'loading') return `${sheetHead('Nouvelle recommandation')}<div class="loading"><div class="spinner"></div>${esc(M.msg || 'L\'IA lit ta capture…')}</div>`;
+  if(M.phase === 'error') return `${sheetHead('Nouvelle recommandation')}<div class="err">${esc(M.error)}</div>
+    ${M.nokey ? `<button class="btn block" data-a="openSettings">Ouvrir les réglages</button>` : ''}
+    <button class="btn line block" data-a="pickShot">${I.image} Choisir la capture dans Photos</button>
+    <button class="btn light block" data-a="openAdd">Ajouter à la main</button>`;
+  const n = M.items.filter(x => x.checked).length;
+  return `${sheetHead(plural(M.items.length, 'livre') + ' ' + (M.items.length>1?'trouvés':'trouvé'))}
+    <div>${M.items.map((x,i) => `
+      <button class="litem" data-a="toggleImp" data-v="${i}" ${x.owned?'disabled':''} aria-pressed="${x.checked}">
+        ${coverHTML(x.cand,'width:52px;height:78px')}
+        <div class="meta"><span class="ttl">${esc(x.cand.title)}</span><span class="aut">${esc(x.cand.author || 'Auteur inconnu')}</span>${x.owned ? '<span class="small">Déjà dans ta liste</span>' : ''}</div>
+        ${x.owned ? '' : `<span class="check ${x.checked?'on':''}">${x.checked ? I.check : ''}</span>`}
+      </button>`).join('')}</div>
+    <button class="btn block" data-a="confirmImp" ${!n || M.busy ? 'disabled' : ''}>${M.busy ? '<div class="spinner" style="border-top-color:#fff;border-color:#555"></div> Préparation des fiches…' : 'Ajouter ' + plural(n, 'livre') + ' à lire'}</button>`;
+}
+
+function sheetSettings(){
+  const link = location.origin + location.pathname;
+  return `${sheetHead('Réglages')}
+  ${SHEET.nokey ? `<div class="err" style="background:#FFF7E8;color:#7A4A00">Pour lire une image de capture, l'IA est nécessaire. Ajoute une clé Gemini gratuite, ou passe par le raccourci (il lit le texte de l'écran).</div>` : ''}
+  <div class="panel" style="flex-direction:row;align-items:center;gap:10px"><span style="width:10px;height:10px;border-radius:5px;flex-shrink:0;background:${hasAI() ? '#2E8B57' : '#B8B8C0'}"></span><span style="font-size:14px">${hasAI() ? 'IA activée (Gemini gratuit)' : S.settings.aiStatus === 'blocked' ? 'Mode sans IA : Gemini gratuit refusé depuis ton pays' : 'Mode sans IA'}</span></div>
+  <form class="col" style="gap:10px" data-form="settings">
+    <label class="label" for="key">Clé Gemini (gratuite)</label>
+    <input id="key" class="inp" type="password" placeholder="AIza…" value="${esc(S.settings.apiKey)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <p class="small" style="line-height:1.45">Crée-la gratuitement sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> avec ton compte Google, sans carte bancaire. Elle reste uniquement sur ce téléphone. Sans clé, l'app marche quand même, sans résumés en français, spice estimé ni recos de l'IA.</p>
+    ${S.settings.apiKey ? `<button type="button" class="btn light block" data-a="testAI">Tester la clé</button>` : ''}
+    <label class="label" for="goal" style="margin-top:6px">Objectif de lecture annuel</label>
+    <input id="goal" class="inp" type="number" inputmode="numeric" min="0" max="500" value="${esc(S.settings.goal)}">
+    <button class="btn block">Enregistrer</button>
+  </form>
+  <div class="col" style="gap:10px">
+    <span class="label">Sauvegarde</span>
+    <p class="small" style="line-height:1.45">Ta liste est enregistrée dans Safari sur ce téléphone. Exporte-la de temps en temps (fichier dans l'app Fichiers) pour ne rien perdre.${S.lastBackup ? ' Dernière sauvegarde : ' + fmtDate(S.lastBackup) + '.' : ''}</p>
+    <div class="row"><button class="btn line" style="flex:1" data-a="exportData">Exporter</button><button class="btn line" style="flex:1" data-a="importData">Importer</button></div>
+  </div>
+  <div class="col" style="gap:8px">
+    <span class="label">Adresse pour le raccourci iPhone</span>
+    <div class="code">${esc(link)}?import=</div>
+    <button class="btn light block" data-a="copyLink">Copier</button>
+  </div>`;
+}
+
+/* ============ Actions ============ */
+function candFrom(ref){
+  const [list, i] = ref.split(':');
+  const arr = list==='res' ? UI.sResults : list==='rec' ? S.recs : list==='add' ? (SHEET && SHEET.results) : null;
+  return arr ? arr[Number(i)] : null;
+}
+async function addOne(cand, sourceType){
+  const src = {type:sourceType, date:Date.now()};
+  const added = await addCandidates([cand], src);
+  if(added.length) toast('« ' + added[0].title + ' » ajouté à ta liste');
+  return added[0];
+}
+const A = {
+  tab(v){ UI.tab = v; render(); window.scrollTo(0,0); },
+  seg(v){ UI.seg = v; render(); },
+  libGenre(v){ UI.libGenre = v; render(); },
+  open(v){ SHEET = {kind:'detail', id:v}; renderSheet(); },
+  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec'); SHEET = {kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}; renderSheet(); },
+  close(){ closeSheet(); },
+  async addCurrent(){
+    if(SHEET.busy) return; SHEET.busy = true; renderSheet();
+    const ref = SHEET.ref; const b = await addOne(SHEET.cand, SHEET.srcType);
+    if(ref && ref.startsWith('rec')) S.recs.splice(Number(ref.split(':')[1]), 1), save();
+    SHEET = b ? {kind:'detail', id:b.id} : null; renderSheet(); render();
+  },
+  async addCand(v, el){
+    const c = candFrom(v); if(!c) return;
+    el.disabled = true; el.innerHTML = '<div class="spinner"></div>';
+    const type = v.startsWith('rec') ? 'ia' : 'recherche';
+    await addOne(c, type);
+    if(v.startsWith('rec')){ S.recs.splice(Number(v.split(':')[1]), 1); save(); }
+    if(SHEET && SHEET.kind === 'add') renderSheet();
+    render();
+  },
+  dislike(v){ const r = S.recs[Number(v)]; if(r){ S.dislikes.push(r.title); S.recs.splice(Number(v),1); save(); render(); } },
+  status(v){
+    const b = currentBook(); if(!b) return;
+    b.status = v;
+    if(v === 'reading' && !b.startedAt) b.startedAt = Date.now();
+    if(v === 'read'){ if(!b.finishedAt) b.finishedAt = Date.now(); } else b.finishedAt = null;
+    save(); renderSheet();
+    if(v === 'read') toast('Bravo ! Pense à lui donner une note.');
+  },
+  rating(v){ const b = currentBook(); const n = Number(v); b.rating = b.rating === n ? 0 : n; save(); renderSheet(); },
+  spice(v){ const b = currentBook(); const n = Number(v); b.spice = b.spice === n ? null : n; save(); renderSheet(); },
+  askDel(){ SHEET.confirmDel = true; renderSheet(); },
+  cancelDel(){ SHEET.confirmDel = false; renderSheet(); },
+  doDel(){ S.books = S.books.filter(b => b.id !== SHEET.id); save(); closeSheet(); toast('Livre supprimé'); },
+  openAdd(){ SHEET = {kind:'add', q:'', results:null}; renderSheet(); },
+  openSettings(){ SHEET = {kind:'settings', nokey: !S.settings.apiKey}; renderSheet(); },
+  pickShot(){ const f = $('#fileShot'); f.value = ''; f.click(); },
+  sGenre(v){ UI.sGenre = v; UI.sSpice = ''; if(UI.q) runSearch(); else if(v) loadCurated(false); else { UI.sResults = null; UI.sError=''; render(); } },
+  refreshCurated(){ loadCurated(true); },
+  recommend(v){ recommend(v || ''); },
+  toggleImp(v){ const x = SHEET.items[Number(v)]; if(x && !x.owned){ x.checked = !x.checked; renderSheet(); } },
+  async confirmImp(){
+    if(SHEET.busy) return; SHEET.busy = true; renderSheet();
+    const picks = SHEET.items.filter(x => x.checked).map(x => x.cand);
+    const added = await addCandidates(picks, SHEET.source);
+    SHEET = null; renderSheet(); UI.tab = 'lib'; UI.seg = 'toread'; render();
+    if(added.length) toast(plural(added.length, 'livre') + ' ' + (added.length>1?'ajoutés':'ajouté') + ' à ta liste');
+  },
+  exportData(){
+    try{
+      const blob = new Blob([JSON.stringify({app:'ma-liste-lecture', version:1, date:new Date().toISOString(), books:S.books, settings:{goal:S.settings.goal}, dislikes:S.dislikes}, null, 2)], {type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'ma-liste-lecture-' + new Date().toISOString().slice(0,10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      S.lastBackup = Date.now(); save(); render(); if(SHEET) renderSheet();
+      toast('Sauvegarde créée');
+    }catch(e){ toast('Export impossible : ' + e.message); }
+  },
+  async testAI(v, el){
+    el.disabled = true; el.textContent = 'Test en cours…';
+    const k = $('#key').value.trim(); if(k !== S.settings.apiKey){ S.settings.apiKey = k; S.settings.aiStatus = ''; save(); }
+    try{ const t = await ai({system:'Réponds en JSON.', text:'Renvoie {"ok":true}'}); parseJSON(t); toast('La clé fonctionne, l\'IA est activée !'); }
+    catch(e){ toast(e.message); }
+    renderSheet();
+  },
+  importData(){ const f = $('#fileBackup'); f.value = ''; f.click(); },
+  async copyLink(){ try{ await navigator.clipboard.writeText(location.origin + location.pathname + '?import='); toast('Adresse copiée'); }catch(e){ toast('Copie impossible, sélectionne l\'adresse à la main.'); } }
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-a]'); if(!el || el.disabled) return;
+  const fn = A[el.dataset.a]; if(fn){ e.preventDefault(); fn(el.dataset.v, el, e); }
+});
+document.addEventListener('change', e => {
+  const el = e.target.closest('[data-change]'); if(!el) return;
+  const k = el.dataset.change;
+  if(k === 'sSpice'){ UI.sSpice = el.value; if(!UI.q && UI.sGenre) loadCurated(false); else render(); }
+  if(k === 'year'){ UI.year = Number(el.value); render(); }
+  if(k === 'genre'){ const b = currentBook(); if(b){ b.genre = el.value; save(); renderSheet(); } }
+});
+document.addEventListener('submit', e => {
+  const f = e.target.closest('[data-form]'); if(!f) return; e.preventDefault();
+  const k = f.dataset.form;
+  if(k === 'search'){ UI.q = $('#q').value.trim(); $('#q').blur(); if(UI.q) runSearch(); else if(UI.sGenre) loadCurated(false); else { UI.sResults = null; render(); } }
+  if(k === 'ask'){ const v = $('#ask').value.trim(); if(v) recommend(v); }
+  if(k === 'addsearch'){ addSearch($('#aq').value.trim()); }
+  if(k === 'manual'){ manualAdd($('#mt').value.trim(), $('#ma').value.trim()); }
+  if(k === 'settings'){
+    const k = $('#key').value.trim(); if(k !== S.settings.apiKey){ S.settings.apiKey = k; S.settings.aiStatus = ''; } S.settings.goal = Math.max(0, Number($('#goal').value) || 0); save();
+    const resume = SHEET && SHEET.resume; closeSheet(); toast('Réglages enregistrés');
+    if(resume && hasAI()) startImport(resume);
+  }
+});
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && SHEET) closeSheet(); });
+
+$('#fileShot').addEventListener('change', async e => {
+  const file = e.target.files && e.target.files[0]; if(!file) return;
+  try{ const image = await fileToImage(file); startImport({image}); }catch(err){ toast(err.message); }
+});
+$('#fileBackup').addEventListener('change', async e => {
+  const file = e.target.files && e.target.files[0]; if(!file) return;
+  try{
+    const data = JSON.parse(await file.text());
+    if(!data || !Array.isArray(data.books)) throw new Error('Ce fichier n\'est pas une sauvegarde de l\'app.');
+    const ids = new Set(S.books.map(b => b.id)); let n = 0;
+    data.books.forEach(b => { if(b && b.id && b.title && !ids.has(b.id)){ S.books.push(b); n++; } });
+    if(data.settings && data.settings.goal) S.settings.goal = data.settings.goal;
+    if(Array.isArray(data.dislikes)) S.dislikes = [...new Set(S.dislikes.concat(data.dislikes))];
+    save(); closeSheet(); toast(plural(n, 'livre') + ' ' + (n>1?'importés':'importé'));
+  }catch(err){ toast(err.message); }
+});
+
+/* ============ Flux ============ */
+async function runSearch(){
+  UI.sLoading = true; UI.sError = ''; UI.sResults = null; render();
+  try{
+    const hint = {'Fantasy':' subject:fantasy','Romance':' subject:romance','Romantasy':' romantasy','Policier & thriller':' subject:thriller','Historique':' subject:historical','Science-fiction':' subject:"science fiction"'}[UI.sGenre] || '';
+    let res = await gbSearch(UI.q + hint, 30);
+    if(!res.length && hint) res = await gbSearch(UI.q, 30);
+    const seen = new Set();
+    UI.sResults = res.filter(r => { const k = norm(r.title) + '|' + norm(r.author); if(seen.has(k)) return false; seen.add(k); return true; });
+  }catch(e){ UI.sError = e.message; }
+  UI.sLoading = false; render();
+}
+async function loadCurated(force){
+  const g = UI.sGenre, band = SPICY.has(g) ? UI.sSpice : '';
+  const key = g + '|' + band;
+  const c = S.curated[key];
+  if(!force && c && Date.now() - c.at < 7*86400000){ UI.sResults = c.list; UI.sError=''; render(); return; }
+  UI.sLoading = true; UI.sError = ''; UI.sResults = null; render();
+  if(!hasAI()){
+    try{
+      const res = await gbSearch(GB_GENRE[g] || g, 30);
+      const seen = new Set();
+      UI.sResults = res.filter(r => { const k = norm(r.title); if(seen.has(k) || !r.thumb) return false; seen.add(k); return true; }).map(r => Object.assign(r, {genre:g}));
+    }catch(e){ UI.sError = e.message; }
+    UI.sLoading = false; render(); return;
+  }
+  try{
+    const prev = force && c ? c.list.map(x => x.title) : [];
+    const system = 'Tu es une libraire passionnée. Définitions des genres : ' + GENRE_DEF + ' Réponds uniquement en JSON : {"books":[{"title":"","author":"","series":null,"tome":null,"spice":null}]}. "spice" = intensité des scènes de sexe de 0 à 5 pour Romance et Romantasy, sinon null. Pour une série, donne le tome 1.';
+    const text = 'Propose 15 livres du genre « ' + g + ' » très appréciés des lectrices et lecteurs, en mélangeant incontournables et parutions récentes (jusqu\'à aujourd\'hui), disponibles en français ou en anglais. Titre français s\'il existe.' +
+      (band ? ' Niveau de spice : ' + SPICE_BANDS[band] + '.' : '') +
+      (prev.length ? ' Évite ceux-ci : ' + prev.join(' ; ') + '.' : '') +
+      (S.books.length ? ' Évite aussi ceux qu\'elle a déjà : ' + S.books.map(b => b.title).slice(0,150).join(' ; ') + '.' : '');
+    const out = await ai({system, text});
+    const list = (parseJSON(out).books || []).filter(b => b && b.title).slice(0,15);
+    const rich = await Promise.all(list.map(async b => Object.assign(await lookup(b.title, b.author), {series:b.series||'', tome:Number(b.tome)||null, genre:g, spiceEst: typeof b.spice==='number' ? b.spice : null})));
+    S.curated[key] = {at:Date.now(), list:rich}; save();
+    if(UI.sGenre === g) UI.sResults = rich;
+  }catch(e){ UI.sError = e.message; if(e.blocked){ UI.sLoading = false; return loadCurated(force); } }
+  UI.sLoading = false; render();
+}
+async function recommendNoAI(){
+  const pool = S.books.filter(b => b.rating >= 4).sort((a,b) => b.rating - a.rating);
+  const base = (pool.length ? pool : S.books).slice(0,5);
+  if(!base.length) throw new Error('Ajoute et note quelques livres pour avoir des suggestions.');
+  const seen = new Set(S.books.map(b => norm(b.title)).concat(S.dislikes.map(norm)));
+  const out = [];
+  const ok = r => { const k = norm(r.title); if(!r.thumb || seen.has(k) || S.books.some(b => similar(b.title, r.title))) return false; seen.add(k); return true; };
+  for(const b of base){
+    const au = (b.author || '').split(',')[0].trim(); if(!au) continue;
+    let res = []; try{ res = await gbSearch('inauthor:"' + au + '"', 15); }catch(e){}
+    const pick = res.find(ok);
+    if(pick) out.push(Object.assign(pick, {genre:b.genre, why:'Du même auteur que ' + b.title + (b.rating ? ', que tu as noté ' + b.rating + '/5' : '') + '.', spiceEst:null}));
+    if(out.length >= 3) break;
+  }
+  const count = {}; base.forEach(b => count[b.genre] = (count[b.genre]||0) + 1);
+  const g = Object.keys(count).sort((a,b) => count[b] - count[a])[0];
+  if(g){ let res = []; try{ res = await gbSearch(GB_GENRE[g] || g, 30); }catch(e){}
+    res.filter(ok).slice(0, 5 - out.length).forEach(r => out.push(Object.assign(r, {genre:g, why:'Populaire en ' + g + ', ton genre préféré.', spiceEst:null}))); }
+  if(!out.length) throw new Error('Pas de suggestion trouvée pour l\'instant.');
+  return out;
+}
+async function recommend(ask){
+  if(UI.recLoading) return;
+  UI.recLoading = true; UI.recError = ''; UI.tab = 'me'; render();
+  if(!hasAI()){
+    try{ S.recs = (await recommendNoAI()).map(r => Object.assign(r, {ask:''})); save(); }catch(e){ UI.recError = e.message; }
+    UI.recLoading = false; render(); return;
+  }
+  try{
+    const lib = S.books.map(b => ({titre:b.title, auteur:b.author, genre:b.genre, statut: b.status==='read'?'lu':b.status==='reading'?'en cours':'à lire', note: b.rating || null, spice: b.spice ?? null}));
+    const system = 'Tu es la libraire personnelle d\'une lectrice. Tu connais sa bibliothèque : les notes vont de 1 (déteste) à 5 (adore) ; le spice de 0 à 5 est la note qu\'elle a donnée à l\'intensité des scènes de sexe. Déduis ses goûts surtout des livres notés. Genres possibles : ' + GENRES.join(', ') + '. Définitions : ' + GENRE_DEF + ' Propose 5 livres qu\'elle n\'a pas déjà, publiés (pas d\'inventions), disponibles en français ou en anglais, titre français s\'il existe. Pour une série, propose le tome 1 sauf si elle a lu les précédents. "why" : une phrase en français, chaleureuse et précise, qui cite au moins une de ses lectures quand c\'est possible. Réponds uniquement en JSON : {"recs":[{"title":"","author":"","genre":"","why":"","spice":null}]} ("spice" de 0 à 5 pour Romance et Romantasy, sinon null).';
+    const text = 'Sa bibliothèque : ' + JSON.stringify(lib.slice(0,300)) + '\nLivres qu\'elle a refusés (ne pas reproposer) : ' + JSON.stringify(S.dislikes.slice(-80)) + '\nSa demande : ' + (ask || 'ma prochaine lecture idéale, en variant un peu les genres que j\'aime');
+    const out = await ai({system, text});
+    const recs = (parseJSON(out).recs || []).filter(r => r && r.title && !findOwned(r.title)).slice(0,5);
+    S.recs = await Promise.all(recs.map(async r => Object.assign(await lookup(r.title, r.author), {genre: GENRES.includes(r.genre) ? r.genre : '', why:r.why||'', spiceEst: typeof r.spice==='number' ? r.spice : null, ask: ask||''})));
+    save();
+  }catch(e){ UI.recError = e.message; if(e.blocked){ UI.recLoading = false; return recommend(ask); } }
+  UI.recLoading = false; render();
+  const f = $('#ask'); if(f) f.value = '';
+}
+async function addSearch(q){
+  SHEET.q = q; if(!q) return;
+  SHEET.loading = true; SHEET.error = ''; renderSheet();
+  try{ SHEET.results = await gbSearch(q, 15); }catch(e){ SHEET.error = e.message; }
+  SHEET.loading = false; if(SHEET && SHEET.kind==='add') renderSheet();
+}
+async function manualAdd(title, author){
+  if(!title) return;
+  SHEET.busy = true; renderSheet();
+  const c = await lookup(title, author);
+  const b = await addOne(c, 'manuel');
+  SHEET = b ? {kind:'detail', id:b.id} : null; renderSheet(); render();
+}
+async function extractNoAI(text){
+  const noise = /[@#]|https?:|www\.|\b(likes?|j'aime|abonn|suivre|follow|comment|r[ée]pon|reply|reels?|audio|vues|views|partag|envoyer|send|sponsoris|traduction|voir la)/i;
+  const lines = [...new Set(String(text||'').split(/\n+/).map(x => x.replace(/[•|]+/g,' ').trim()))]
+    .filter(x => x.length >= 3 && x.length <= 80 && !noise.test(x) && /[a-zà-ÿ]{3}/i.test(x)).slice(0, 14);
+  const found = await Promise.all(lines.map(async l => {
+    let res = []; try{ res = await gbSearch(l, 4); }catch(e){}
+    return res.find(r => similar(r.title, l) && r.title.length >= 3) || null;
+  }));
+  const seen = new Set();
+  return found.filter(r => r && !seen.has(norm(r.title)) && seen.add(norm(r.title)));
+}
+async function startImport(input){
+  SHEET = {kind:'import', phase:'loading', msg: hasAI() ? 'L\'IA lit ta capture…' : 'Lecture de la capture…', items:[], source:{type:input.image ? 'capture' : 'instagram', url:input.url||'', date:Date.now()}};
+  renderSheet();
+  try{
+    if(!input.text && !input.image) throw new Error('La capture n\'a pas pu être lue. Choisis-la dans Photos ci-dessous.');
+    let cands;
+    if(!hasAI() && !input.image){
+      SHEET.msg = 'Recherche des livres sur la capture…'; renderSheet();
+      cands = await extractNoAI(input.text);
+    } else {
+      let found;
+      try{ found = await extractBooks(input); }
+      catch(e){ if(e.blocked && input.text){ return startImport(input); } throw e; }
+      if(!found.length) throw new Error('Aucun livre trouvé sur cette capture. Si le titre n\'apparaît que sur la couverture, choisis la capture dans Photos : l\'IA lira l\'image.');
+      SHEET.msg = 'Recherche des couvertures…'; renderSheet();
+      cands = await Promise.all(found.map(f => lookup(f.title, f.author)));
+    }
+    if(!cands.length) throw new Error('Aucun livre reconnu sur cette capture. Tu peux l\'ajouter à la main.');
+    SHEET.items = cands.map(c => { const o = findOwned(c.title); return {cand:c, owned:!!o, checked:!o}; });
+    SHEET.phase = 'pick';
+  }catch(e){
+    SHEET.phase = 'error'; SHEET.error = e.message; SHEET.nokey = !!e.nokey;
+    if(e.nokey){ SHEET = {kind:'settings', nokey:true, resume:input}; }
+  }
+  renderSheet();
+}
+function handleLaunch(){
+  const p = new URLSearchParams(location.search);
+  const text = p.get('import'), url = p.get('url');
+  if(text != null || url){
+    history.replaceState(null, '', location.pathname);
+    startImport({text:(text||'').trim(), url:url||''});
+  }
+}
+
+render();
+handleLaunch();
+</script>
+</body>
+</html>

@@ -212,6 +212,7 @@ async function gh(path, opt){
   if(r.status === 401) throw new Error('Jeton GitHub refusé : vérifie-le dans les réglages.');
   if(r.status === 403) throw new Error('Le jeton GitHub n\'a pas le droit « gist ».');
   if(!r.ok){ const e = new Error('Synchro GitHub impossible (' + r.status + ').'); e.status = r.status; throw e; }
+  if(r.status === 204) return null;
   return r.json();
 }
 function mergeRemote(rem){
@@ -237,8 +238,17 @@ async function syncNow(manual){
   let changed = false;
   try{
     let gist = null;
-    if(S.settings.gistId){ try{ gist = await gh('/gists/' + S.settings.gistId); }catch(e){ if(e.status !== 404) throw e; S.settings.gistId = ''; } }
-    if(!gist){ const list = await gh('/gists?per_page=100'); const f = list.find(g => g.description === GIST_DESC && g.files && g.files[GIST_FILE]); if(f) gist = await gh('/gists/' + f.id); }
+    // retrouve TOUTES les copies (si deux appareils en ont créé chacun une, on les fusionne)
+    const list = await gh('/gists?per_page=100&t=' + Date.now());
+    const mine = list.filter(g => g.description === GIST_DESC && g.files && g.files[GIST_FILE]).sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
+    const extras = [];
+    for(const g of mine){
+      const full = await gh('/gists/' + g.id + '?t=' + Date.now());
+      if(!gist) gist = full; else extras.push(full);
+    }
+    for(const x of extras){
+      try{ const c = x.files[GIST_FILE].content; if(c){ if(mergeRemote(JSON.parse(c))) changed = true; } }catch(e){}
+    }
     if(gist){
       S.settings.gistId = gist.id;
       const f = gist.files[GIST_FILE];
@@ -246,13 +256,14 @@ async function syncNow(manual){
       if(f && f.truncated && f.raw_url){ try{ content = await (await fetch(f.raw_url)).text(); }catch(e){} }
       let remKey = '';
       if(content){ try{ const rem = JSON.parse(content); remKey = JSON.stringify([rem.books, rem.deleted || {}, rem.dislikes || []]); changed = mergeRemote(rem); }catch(e){} }
-      if(syncKey() !== remKey){
+      if(syncKey() !== remKey || extras.length){
         await gh('/gists/' + gist.id, {method:'PATCH', body:JSON.stringify({files:{[GIST_FILE]:{content:JSON.stringify({app:'ma-liste-lecture', v:1, at:Date.now(), books:S.books, deleted:S.deleted || {}, dislikes:S.dislikes || []})}}})});
       }
     } else {
       const g = await gh('/gists', {method:'POST', body:JSON.stringify({description:GIST_DESC, public:false, files:{[GIST_FILE]:{content:JSON.stringify({app:'ma-liste-lecture', v:1, at:Date.now(), books:S.books, deleted:S.deleted || {}, dislikes:S.dislikes || []})}}})});
       S.settings.gistId = g.id;
     }
+    for(const x of extras){ try{ await gh('/gists/' + x.id, {method:'DELETE'}); }catch(e){} }
     SYNC.key = syncKey(); S.lastSync = Date.now(); saveLocal();
     if(manual) toast(changed ? 'Liste synchronisée' : 'Tout est à jour');
   }catch(e){ SYNC.err = e.message; if(manual) toast(e.message); }
@@ -260,6 +271,7 @@ async function syncNow(manual){
   if(changed){ render(); if(SHEET && SHEET.kind === 'detail' && SHEET.id && !S.books.some(b => b.id === SHEET.id)) SHEET = null; }
   renderSheet();
 }
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden' && SYNC.timer && S.settings.ghToken){ clearTimeout(SYNC.timer); SYNC.timer = null; syncNow(false); } });
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && S.settings.ghToken && Date.now() - (S.lastSync || 0) > 20000) syncNow(false); });
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 

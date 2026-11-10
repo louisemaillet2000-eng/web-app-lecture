@@ -107,6 +107,8 @@ select.mini{border:none;background:var(--soft);border-radius:10px;height:36px;pa
 .folder svg{flex-shrink:0}
 .chips.scroll{flex-wrap:nowrap;overflow-x:auto;margin:0 -20px;padding:0 20px 2px;scrollbar-width:none}
 .chips.scroll::-webkit-scrollbar{display:none}
+.inp[type=date]{-webkit-appearance:none;appearance:none;display:block;min-width:0;width:100%;text-align:left;line-height:46px}
+textarea.inp{font:inherit;font-size:15px}
 .code{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:var(--soft);padding:10px 12px;border-radius:10px;word-break:break-all}
 </style>
 </head>
@@ -163,7 +165,7 @@ const GB_GENRE_Q = {
   'Non-fiction':['subject:biography bestseller','essai bestseller','subject:"self-help"']
 };
 const STORE = 'ma-liste-lecture-v1';
-const APP_VERSION = '2026-11-10 · v13';
+const APP_VERSION = '2026-11-10 · v15';
 const COVER_COLORS = ['#7A2E1F','#1F3A5F','#3B3B3B','#5C1A1A','#2D4A3E','#4A5568','#0F5257','#8C2F39','#5B1E2D','#7A5C2E'];
 const LANGS = {fr:'En français', en:'En anglais'};
 const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
@@ -183,6 +185,7 @@ const I = {
   tabLib:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h14v16H6a2 2 0 0 0-2 2.5z"/><path d="M4 19.5A2 2 0 0 1 6 21h14"/></svg>',
   tabSearch:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
   tabMe:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>',
+  filter:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>',
   tabStats:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>'
 };
 const starSVG = (on, size=26) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${on?'#111114':'none'}" stroke="${on?'#111114':'#B8B8C0'}" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z"/></svg>`;
@@ -195,6 +198,10 @@ function loadState(){
   return defaults();
 }
 let S = loadState();
+function isEditing(){ const a = document.activeElement; return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.id !== 'q' && a.id !== 'ask'); }
+let BG_PENDING = false;
+function bgRender(){ if(isEditing()){ BG_PENDING = true; return; } render(); renderSheet(); }
+document.addEventListener('focusout', () => setTimeout(() => { if(BG_PENDING && !isEditing()){ BG_PENDING = false; render(); renderSheet(); } }, 400));
 function touch(b){ if(b) b.updatedAt = Date.now(); }
 function saveLocal(){ try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){ toast("Impossible d'enregistrer sur cet appareil."); } }
 function save(){ saveLocal(); scheduleSync(); }
@@ -237,7 +244,7 @@ function mergeRemote(rem){
 async function syncNow(manual){
   if(!S.settings.ghToken){ if(manual) toast('Ajoute d\'abord ton jeton GitHub.'); return; }
   if(SYNC.busy) return;
-  SYNC.busy = true; SYNC.err = ''; if(SHEET && SHEET.kind === 'settings') renderSheet();
+  SYNC.busy = true; SYNC.err = ''; if(SHEET && SHEET.kind === 'settings' && !isEditing()) renderSheet();
   let changed = false;
   try{
     let gist = null;
@@ -271,8 +278,8 @@ async function syncNow(manual){
     if(manual) toast(changed ? 'Liste synchronisée' : 'Tout est à jour');
   }catch(e){ SYNC.err = e.message; if(manual) toast(e.message); }
   SYNC.busy = false;
-  if(changed){ render(); if(SHEET && SHEET.kind === 'detail' && SHEET.id && !S.books.some(b => b.id === SHEET.id)) closeSheet(); }
-  renderSheet();
+  if(changed && SHEET && SHEET.kind === 'detail' && SHEET.id && !S.books.some(b => b.id === SHEET.id)){ closeSheet(); return; }
+  if(changed || (SHEET && SHEET.kind === 'settings')) bgRender();
 }
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden' && SYNC.timer && S.settings.ghToken){ clearTimeout(SYNC.timer); SYNC.timer = null; syncNow(false); } });
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && S.settings.ghToken && Date.now() - (S.lastSync || 0) > 20000) syncNow(false); });
@@ -468,7 +475,7 @@ async function extractBooks({text, image}){
   return (parseJSON(out).books || []).filter(b => b && b.title && !seen.has(norm(b.title)) && seen.add(norm(b.title)));
 }
 async function enrichBooks(cands){
-  const system = 'Tu es une libraire experte. Pour chaque livre reçu, donne des informations fiables en français. Genre : exactement un parmi ' + GENRES.join(', ') + '. Définitions : ' + GENRE_DEF + ' Spice = intensité des scènes de sexe, de 0 (aucune) à 5 (très explicite), seulement pour Romance et Romantasy, sinon null. Si tu n\'es pas sûre d\'une info de série, mets null. Réponds uniquement en JSON, dans le même ordre que l\'entrée : {"books":[{"title":"","author":"","series":null,"tome":null,"seriesTotal":null,"genre":"","tags":[""],"summary":"","spice":null}]}';
+  const system = 'Tu es une libraire experte. Pour chaque livre reçu, donne des informations fiables en français. N\'invente jamais : si tu ne connais pas ce livre précis avec certitude (titre ET auteur), appuie-toi uniquement sur la description fournie ; si elle est vide, mets "summary" à "" et ne donne que des tags génériques sûrs. Ne confonds pas avec un autre livre au titre proche. Genre : exactement un parmi ' + GENRES.join(', ') + '. Définitions : ' + GENRE_DEF + ' Spice = intensité des scènes de sexe, de 0 (aucune) à 5 (très explicite), seulement pour Romance et Romantasy, sinon null. Si tu n\'es pas sûre d\'une info de série, mets null. Réponds uniquement en JSON, dans le même ordre que l\'entrée : {"books":[{"title":"","author":"","series":null,"tome":null,"seriesTotal":null,"genre":"","tags":[""],"summary":"","spice":null}]}';
   const items = cands.map((c, i) => ({n:i+1, title:c.title, author:c.author, categories:c.categories, description:(c.desc||'').slice(0,1200)}));
   const known = [...new Set(S.books.map(b => b.series).filter(Boolean))].slice(0,100);
   const text = 'Livres :\n' + JSON.stringify(items) + '\n\n"title" : le titre tel que publié (corrige seulement les erreurs). "series" : nom de la série ou null' + (known.length ? ' (si le livre appartient à une de ces séries déjà dans sa bibliothèque, réutilise exactement ce nom : ' + known.join(' ; ') + ')' : '') + '. "tome" : numéro du livre dans la série. "seriesTotal" : nombre total de tomes parus ou prévus. "tags" : 2 ou 3 mots-clés courts (thèmes ou tropes, ex. "Dragons", "Enemies to lovers", "Huis clos"). "summary" : 3 à 4 phrases en français, sans spoiler.';
@@ -539,6 +546,29 @@ function fromDateInput(v){ if(!v) return null; const [y,m,d] = v.split('-').map(
 function addExtra(){ const e = {lang: SHEET && SHEET.lang != null ? SHEET.lang : (S.settings.lastLang || '')}; if(SHEET && SHEET.status === 'read' && SHEET.finDate) e.finishedAt = fromDateInput(SHEET.finDate); if(e.lang){ S.settings.lastLang = e.lang; saveLocal(); } return e; }
 const langSeg = () => `<div class="col" style="gap:8px"><span class="label">Langue de lecture</span><div class="seg">${[['fr','Français'],['en','Anglais'],['','Non précisé']].map(([k,l]) => `<button type="button" class="${(SHEET.lang ?? (S.settings.lastLang || 'fr'))===k?'on':''}" data-a="setLang" data-v="${k}">${l}</button>`).join('')}</div></div>`;
 const finDateField = () => SHEET.status === 'read' ? `<label class="col" style="gap:8px"><span class="label">Terminé le</span><input class="inp" type="date" data-change="finDate" value="${esc(SHEET.finDate || toDateInput(Date.now()))}" max="${toDateInput(Date.now())}"></label>` : '';
+function tagLabel(k){
+  if(k[0] === '@') return LANGS[k.slice(1)] || k;
+  for(const b of S.books) for(const t of (b.tags || [])) if(norm(t) === k) return String(t).trim();
+  return k;
+}
+function sheetFilter(){
+  let list = S.books.filter(b => b.status === UI.seg);
+  const present = GENRES.map(g => ({g, n:list.filter(b => b.genre === g).length})).filter(x => x.n);
+  if(UI.libGenre) list = list.filter(b => b.genre === UI.libGenre);
+  const keysOf = b => (b.tags || []).map(norm).filter(Boolean).concat(b.lang ? ['@' + b.lang] : []);
+  const filtered = UI.libTags.length ? list.filter(b => { const ks = keysOf(b); return UI.libTags.every(k => ks.includes(k)); }) : list;
+  const count = {};
+  filtered.forEach(b => keysOf(b).forEach(k => count[k] = (count[k] || 0) + 1));
+  UI.libTags.forEach(k => { if(!count[k]) count[k] = 0; });
+  const tags = Object.keys(count).sort((a,b) => (UI.libTags.includes(b) - UI.libTags.includes(a)) || ((b[0]==='@') - (a[0]==='@')) || count[b] - count[a] || tagLabel(a).localeCompare(tagLabel(b)));
+  return `${sheetHead('Filtrer')}
+    <div class="col" style="gap:10px"><span class="label">Genre</span>
+      <div class="chips"><button class="chip sm ${!UI.libGenre?'on':''}" data-a="libGenre" data-v="">Tous</button>${present.map(x => `<button class="chip sm ${UI.libGenre===x.g?'on':''}" data-a="libGenre" data-v="${esc(x.g)}">${esc(x.g)} · ${x.n}</button>`).join('')}</div></div>
+    ${tags.length ? `<div class="col" style="gap:10px"><span class="label">Tags</span>
+      <div class="chips">${tags.map(k => { const on = UI.libTags.includes(k); return `<button class="chip sm ${on?'on':''}" data-a="libTag" data-v="${esc(k)}" aria-pressed="${on}">${on ? I.check + ' ' : ''}${esc(tagLabel(k))}${on ? '' : ' · ' + count[k]}</button>`; }).join('')}</div>
+      <p class="small">Tu peux en choisir plusieurs : seuls les livres qui ont tous ces tags restent.</p></div>` : ''}
+    <div class="row" style="gap:8px"><button class="btn light" style="flex:1" data-a="clearFilters">Réinitialiser</button><button class="btn" style="flex:1" data-a="close">Voir ${plural(filtered.length, 'livre')}</button></div>`;
+}
 const statusSeg = () => `<div class="col" style="gap:8px"><span class="label">Ajouter dans</span><div class="seg">${[['toread','À lire'],['reading','En cours'],['read','Lus']].map(([k,l]) => `<button type="button" class="${(SHEET.status||'toread')===k?'on':''}" data-a="setStatus" data-v="${k}">${l}</button>`).join('')}</div></div>`;
 const folderSVG = c => `<svg width="18" height="18" viewBox="0 0 24 24" fill="${c}" fill-opacity=".18" stroke="${c}" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
 function viewLib(){
@@ -604,19 +634,24 @@ function viewLib(){
   </div>
   ${needBackup ? `<div class="banner">Pense à sauvegarder ta liste de temps en temps.<button data-a="exportData">Sauvegarder</button></div>` : ''}
   ${!S.settings.apiKey && !S.settings.noAI ? `<div class="banner">Active l'IA gratuite (Gemini) pour les résumés, le spice et les recos.<button data-a="openSettings">Réglages</button></div>` : ''}
-  ${!UI.libSeries ? weeklyCard() : ''}
   <div class="seg" role="tablist">
     <button class="${seg==='reading'?'on':''}" data-a="seg" data-v="reading">En cours</button>
     <button class="${seg==='toread'?'on':''}" data-a="seg" data-v="toread">À lire</button>
     <button class="${seg==='read'?'on':''}" data-a="seg" data-v="read">Lus</button>
   </div>
-  ${present.length && seg !== 'reading' && !UI.libSeries ? `<div class="folders" role="group" aria-label="Genres">
+  ${seg === 'read' && !UI.libSeries && S.books.some(b => b.status === 'read') ? `<div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="chip ${UI.libGenre || UI.libTags.length ? 'on' : ''}" data-a="openFilter">${I.filter} Filtrer${UI.libGenre || UI.libTags.length ? ' · ' + ((UI.libGenre ? 1 : 0) + UI.libTags.length) : ''}</button>
+      ${UI.libGenre ? `<button class="chip sm" data-a="libGenre" data-v="" aria-label="Retirer le filtre ${esc(UI.libGenre)}">${esc(UI.libGenre)} ${I.close}</button>` : ''}
+      ${UI.libTags.map(k => `<button class="chip sm" data-a="libTag" data-v="${esc(k)}" aria-label="Retirer le tag">${esc(tagLabel(k))} ${I.close}</button>`).join('')}
+    </div>` : ''}
+  ${present.length && seg === 'toread' && !UI.libSeries ? `<div class="folders" role="group" aria-label="Genres">
       <button class="folder ${!UI.libGenre?'on':''}" data-a="libGenre" data-v="">${folderSVG('#111114')}Tous<b>${segCount}</b></button>
       ${present.map(x => `<button class="folder ${UI.libGenre===x.g?'on':''}" data-a="libGenre" data-v="${esc(x.g)}">${folderSVG(GSTYLE[x.g].bar)}${esc(x.g)}<b>${x.n}</b></button>`).join('')}
     </div>` : ''}
   ${seriesHead}
-  ${tags.length && seg !== 'reading' && !UI.libSeries ? `<div class="col" style="gap:8px"><span class="label">Tags${UI.libTags.length > 1 ? ' · livres qui ont tous ces tags' : ''}</span><div class="chips scroll">${UI.libTags.length ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer (${UI.libTags.length})</button>` : ''}${tags.map(([k,t]) => { const on = UI.libTags.includes(k); return `<button class="chip sm ${on?'on':''}" data-a="libTag" data-v="${esc(k)}" aria-pressed="${on}">${on ? I.check + ' ' : ''}${esc(t.label)}${on ? '' : ' · ' + t.n}</button>`; }).join('')}</div></div>` : ''}
-  ${body}`;
+  ${tags.length && seg === 'toread' && !UI.libSeries ? `<div class="col" style="gap:8px"><span class="label">Tags${UI.libTags.length > 1 ? ' · livres qui ont tous ces tags' : ''}</span><div class="chips scroll">${UI.libTags.length ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer (${UI.libTags.length})</button>` : ''}${tags.map(([k,t]) => { const on = UI.libTags.includes(k); return `<button class="chip sm ${on?'on':''}" data-a="libTag" data-v="${esc(k)}" aria-pressed="${on}">${on ? I.check + ' ' : ''}${esc(t.label)}${on ? '' : ' · ' + t.n}</button>`; }).join('')}</div></div>` : ''}
+  ${body}
+  ${seg === 'reading' ? weeklyCard() : ''}`;
 }
 
 function viewSearch(){
@@ -766,7 +801,7 @@ function renderSheet(){
   const same = el.dataset.key === key;
   if(SHEET.kind === 'detail') el.innerHTML = `<div class="full" role="dialog" aria-modal="true" aria-label="Fiche livre"><div class="full-inner">${sheetDetail()}</div></div>`;
   else {
-    const inner = SHEET.kind==='add' ? sheetAdd() : SHEET.kind==='import' ? sheetImport() : sheetSettings();
+    const inner = SHEET.kind==='add' ? sheetAdd() : SHEET.kind==='import' ? sheetImport() : SHEET.kind==='filter' ? sheetFilter() : sheetSettings();
     el.innerHTML = `<div class="backdrop" data-a="close"></div><div class="pane" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
   }
   el.dataset.key = key;
@@ -851,7 +886,7 @@ function sheetDetail(){
         <button class="${st==='reading'?'on':''}" data-a="status" data-v="reading">En cours</button>
         <button class="${st==='read'?'on':''}" data-a="status" data-v="read">Lu</button>
       </div>
-      ${st !== 'toread' ? `<div class="row" style="gap:10px;align-items:flex-end">
+      ${st !== 'toread' ? `<div style="display:grid;grid-template-columns:repeat(${st === 'read' ? 2 : 1},minmax(0,1fr));gap:10px">
         <label class="col" style="gap:6px;flex:1;min-width:0"><span class="label">Commencé le</span><input class="inp" type="date" data-change="startedAt" value="${toDateInput(b.startedAt)}" max="${toDateInput(Date.now())}"></label>
         ${st === 'read' ? `<label class="col" style="gap:6px;flex:1;min-width:0"><span class="label">Terminé le</span><input class="inp" type="date" data-change="finishedAt" value="${toDateInput(b.finishedAt)}" max="${toDateInput(Date.now())}"></label>` : ''}
       </div>` : ''}
@@ -872,7 +907,16 @@ function sheetDetail(){
           <div class="col" style="gap:2px;flex:1"><span style="font-size:14px;font-weight:600">${src.type==='manuel' ? 'Ajout manuel' : src.type==='ia' ? 'Recommandation de l\'IA' : src.type==='recherche' ? 'Recherche' : 'Vidéo Instagram'}</span><span class="small">Ajouté le ${fmtDate(b.addedAt)}${src.type==='capture'||src.type==='instagram' ? ' · via capture' : ''}</span></div>
           ${src.url ? I.chev + '</a>' : '</div>'}
       </div>
-      ${!b.enriched && hasAI() ? `<button class="btn line block" data-a="enrichOne" ${SHEET.busy?'disabled':''}>${SHEET.busy ? 'L\'IA complète la fiche…' : I.tabMe + ' Compléter avec l\'IA (résumé, genre, spice)'}</button>` : ''}
+      ${SHEET.edit ? `<form class="col" style="gap:10px" data-form="editInfo">
+          <span class="label">Modifier la fiche</span>
+          <label class="sr" for="sumIn">Résumé</label><textarea id="sumIn" class="inp" style="height:160px;padding:12px 14px;line-height:1.45;resize:vertical" placeholder="Résumé">${esc(b.summary || '')}</textarea>
+          <label class="small" for="tagsIn">Tags, séparés par des virgules</label><input id="tagsIn" class="inp" value="${esc((b.tags || []).join(', '))}" autocomplete="off" placeholder="ex. Résilience, Couple, Maladie">
+          <div class="row" style="gap:8px"><button type="button" class="btn light" style="flex:1" data-a="cancelEdit">Annuler</button><button class="btn" style="flex:1">Enregistrer</button></div>
+          ${hasAI() ? `<div class="panel" style="gap:8px"><span class="label">Ou refaire avec l'IA</span>
+            <label class="small" for="hintIn" style="line-height:1.4">Facultatif : donne-lui un indice pour éviter les erreurs (de quoi parle le livre, ou ce qui est faux).</label>
+            <input id="hintIn" class="inp" style="background:#fff" placeholder="ex. une femme qui soutient son compagnon après un accident" autocomplete="off">
+            <button type="button" class="btn line block" data-a="enrichOne" ${SHEET.busy?'disabled':''}>${SHEET.busy ? 'L\'IA refait la fiche…' : I.tabMe + ' Refaire résumé, genre et tags'}</button></div>` : ''}
+        </form>` : `<button class="btn line block" data-a="startEdit">${I.refresh} Modifier le résumé et les tags</button>`}
       <form class="col" style="gap:8px" data-form="series">
         <label class="label" for="serIn">Série</label>
         <div class="row" style="gap:8px"><input id="serIn" class="inp" list="serList" placeholder="Ex. ACOTAR (vide si aucune)" value="${esc(b.series||'')}" autocomplete="off" style="flex:1"><label class="sr" for="tomeIn">Tome</label><input id="tomeIn" class="inp" style="width:86px" type="number" inputmode="numeric" min="0" placeholder="Tome" value="${esc(b.tome||'')}"></div>
@@ -1022,8 +1066,10 @@ const A = {
   seg(v){ if(UI.libSeries) navPop(); UI.seg = v; UI.libGenre = ''; UI.libTags = []; UI.libSeries = ''; render(); },
   openSeries(v){ UI.libSeries = v; render(); window.scrollTo(0,0); navPush(); },
   closeSeries(){ goBack(); },
-  libGenre(v){ UI.libGenre = UI.libGenre === v && v ? '' : v; UI.libTags = []; render(); },
-  libTag(v){ if(!v) UI.libTags = []; else UI.libTags = UI.libTags.includes(v) ? UI.libTags.filter(k => k !== v) : UI.libTags.concat(v); render(); },
+  libGenre(v){ UI.libGenre = UI.libGenre === v && v ? '' : v; UI.libTags = []; render(); if(SHEET && SHEET.kind === 'filter') renderSheet(); },
+  libTag(v){ if(!v) UI.libTags = []; else UI.libTags = UI.libTags.includes(v) ? UI.libTags.filter(k => k !== v) : UI.libTags.concat(v); render(); if(SHEET && SHEET.kind === 'filter') renderSheet(); },
+  openFilter(){ openSheet({kind:'filter'}); },
+  clearFilters(){ UI.libGenre = ''; UI.libTags = []; render(); renderSheet(); },
   seeTag(v){ UI.tab = 'lib'; UI.libGenre = ''; UI.libTags = [v]; const b = currentBook(); if(b) UI.seg = b.status; closeSheet(); },
   open(v){ openSheet({kind:'detail', id:v}); },
   openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip') || v.startsWith('week'); openSheet({kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}); },
@@ -1109,14 +1155,24 @@ const A = {
   },
   async enrichOne(){
     const b = currentBook(); if(!b || SHEET.busy) return;
+    const h = document.getElementById('hintIn'); SHEET.hint = h ? h.value : '';
     SHEET.busy = true; renderSheet();
     try{
-      const [e] = await enrichBooks([Object.assign({desc:'', categories:[]}, b, {desc:b.summary||''})]);
+      const fresh = await lookup(b.title, b.author).catch(() => null);
+      let desc = fresh && fresh.desc || '';
+      if(!desc && fresh && fresh.olKey) desc = await olDesc(fresh.olKey);
+      if(!desc && b.olKey) desc = await olDesc(b.olKey);
+      const hint = (SHEET.hint || '').trim();
+      if(hint) desc = 'Indications de la lectrice (fiables) : ' + hint + (desc ? '\n\nDescription de l\'éditeur : ' + desc : '');
+      const [e] = await enrichBooks([Object.assign({categories:[]}, b, {desc, categories:(fresh && fresh.categories) || []})]);
       Object.assign(b, {title:e.title, author:e.author, series:e.series, tome:e.tome, seriesTotal:e.seriesTotal, genre:e.genre, tags:e.tags, summary:e.summary, spiceEst:e.spiceEst, enriched:true}); touch(b);
-      save(); toast('Fiche complétée');
+      SHEET.edit = false; SHEET.hint = '';
+      save(); toast(e.summary ? 'Fiche refaite' : 'L\'IA ne connaît pas assez ce livre : écris le résumé toi-même');
     }catch(err){ toast(err.message); }
     if(SHEET) SHEET.busy = false; renderSheet(); render();
   },
+  startEdit(){ SHEET.edit = true; renderSheet(); const f = document.querySelector('[data-form="editInfo"]'); if(f) f.scrollIntoView({block:'start', behavior:'smooth'}); },
+  cancelEdit(){ SHEET.edit = false; renderSheet(); },
   syncNow(){ syncNow(true); },
   forceUpdate(){ saveLocal(); location.replace(location.pathname + '?maj=' + Date.now()); },
   retryImport(){ if(LAST_INPUT) startImport(LAST_INPUT); },
@@ -1143,6 +1199,7 @@ document.addEventListener('submit', e => {
   if(k === 'search'){ UI.q = $('#q').value.trim(); $('#q').blur(); if(UI.q) runSearch(); else if(UI.sGenre) loadGenre(); else { UI.sResults = null; render(); } }
   if(k === 'ask'){ const v = $('#ask').value.trim(); if(v) recommend(v); }
   if(k === 'coverUrl'){ const v = $('#curl').value.trim(); const b = currentBook(); if(b && /^https?:\/\//.test(v)){ b.customCover = v.replace(/^http:/, 'https:'); touch(b); save(); SHEET.cover = null; renderSheet(); render(); toast('Couverture changée'); } else toast('Colle un lien qui commence par https://'); }
+  if(k === 'editInfo'){ const b = currentBook(); if(b){ b.summary = $('#sumIn').value.trim(); b.tags = $('#tagsIn').value.split(',').map(t => t.trim()).filter(Boolean).slice(0,8); b.enriched = true; touch(b); save(); SHEET.edit = false; renderSheet(); render(); toast('Fiche mise à jour'); } }
   if(k === 'series'){ const b = currentBook(); if(b){ const v = $('#serIn').value.trim(); const ex = S.books.find(x => x !== b && x.series && norm(x.series) === norm(v)); b.series = ex ? ex.series : v; b.tome = Number($('#tomeIn').value) || null; touch(b); save(); renderSheet(); render(); toast(b.series ? 'Rangé dans la série « ' + b.series + ' »' : 'Série retirée'); } }
   if(k === 'addsearch'){ addSearch($('#aq').value.trim()); }
   if(k === 'manual'){ manualAdd($('#mt').value.trim(), $('#ma').value.trim()); }
@@ -1288,7 +1345,7 @@ async function loadWeekly(force){
     S.weekly = {week:wk, theme:th.label, book, seen:prev.concat(book ? [book.title] : []), hidden:false};
     saveLocal();
   }catch(e){ S.weekly = {week:wk, theme:th.label, book:null, error:e.message, seen:prev, hidden:false}; }
-  WEEK_LOADING = false; if(UI.tab === 'lib') render();
+  WEEK_LOADING = false; if(UI.tab === 'lib' && !isEditing()) render();
 }
 function weeklyCard(){
   const W = S.weekly, th = season(new Date());

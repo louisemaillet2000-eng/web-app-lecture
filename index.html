@@ -116,6 +116,7 @@ select.mini{border:none;background:var(--soft);border-radius:10px;height:36px;pa
 <div id="sheet"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="fileShot" accept="image/*" class="sr" aria-hidden="true" tabindex="-1">
+<input type="file" id="fileCover" accept="image/*" class="sr" aria-hidden="true" tabindex="-1">
 <input type="file" id="fileBackup" accept="application/json,.json" class="sr" aria-hidden="true" tabindex="-1">
 <script>
 'use strict';
@@ -162,8 +163,9 @@ const GB_GENRE_Q = {
   'Non-fiction':['subject:biography bestseller','essai bestseller','subject:"self-help"']
 };
 const STORE = 'ma-liste-lecture-v1';
-const APP_VERSION = '2026-11-09 · v12';
+const APP_VERSION = '2026-11-10 · v13';
 const COVER_COLORS = ['#7A2E1F','#1F3A5F','#3B3B3B','#5C1A1A','#2D4A3E','#4A5568','#0F5257','#8C2F39','#5B1E2D','#7A5C2E'];
+const LANGS = {fr:'En français', en:'En anglais'};
 const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
 const I = {
@@ -276,7 +278,7 @@ document.addEventListener('visibilitychange', () => { if(document.visibilityStat
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && S.settings.ghToken && Date.now() - (S.lastSync || 0) > 20000) syncNow(false); });
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 
-const UI = { tab:'lib', seg:'reading', libGenre:'', libTag:'', libSeries:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
+const UI = { tab:'lib', seg:'reading', libGenre:'', libTags:[], libSeries:'', q:'', sGenre:'', sSpice:'', sResults:null, sLoading:false, sError:'', pop:null, popLoading:false, popError:'', popCache:{}, hideRead:true, aiPicks:null, aiLoading:false, aiError:'', recLoading:false, recError:'', ask:'', year:new Date().getFullYear() };
 let SHEET = null;
 let LAST_INPUT = null;
 let NEXT_STATUS = 'toread';   // {kind:'detail'|'add'|'import'|'settings', ...}
@@ -320,6 +322,7 @@ window.imgErr = function(el){
 window.imgLoad = function(el){ if(el.naturalWidth && el.naturalWidth < 20) imgErr(el); };
 function coverHTML(b, style){
   const srcs = [];
+  if(b.customCover) srcs.push(b.customCover);
   if(b.thumb) srcs.push(b.thumb);
   if(b.isbn) srcs.push(`https://covers.openlibrary.org/b/isbn/${encodeURIComponent(b.isbn)}-L.jpg?default=false`);
   const img = srcs.length ? `<img alt="" loading="lazy" src="${esc(srcs[0])}" data-alt="${esc(srcs.slice(1).join('|'))}" onerror="imgErr(this)" onload="imgLoad(this)">` : '';
@@ -484,13 +487,13 @@ async function enrichBooks(cands){
     });
   });
 }
-function makeBook(c, source, status){
+function makeBook(c, source, status, extra){
   return { id:uid(), title:c.title, author:c.author||'', series:c.series||'', tome:c.tome||null, seriesTotal:c.seriesTotal||null,
     genre:c.genre||guessGenre(c), tags:c.tags||[], summary:c.summary||(c.desc||'').slice(0,600), spiceEst:c.spiceEst ?? null, spice:null, rating:0,
     status:status||'toread', isbn:c.isbn||'', thumb:c.thumb||'', gid:c.gid||'', pages:c.pages||null, year:c.year||'',
-    enriched:!!c.enriched, source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), updatedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?Date.now():null };
+    enriched:!!c.enriched, source:source||{type:'manuel', date:Date.now()}, addedAt:Date.now(), updatedAt:Date.now(), startedAt:status==='reading'?Date.now():null, finishedAt:status==='read'?((extra && extra.finishedAt) || Date.now()):null, lang:(extra && extra.lang) || '' };
 }
-async function addCandidates(cands, source, status){
+async function addCandidates(cands, source, status, extra){
   cands = cands.filter(c => !findOwned(c.title));
   if(!cands.length){ toast('Déjà dans ta liste.'); return []; }
   await Promise.all(cands.map(async c => { if(!c.desc && c.olKey) c.desc = await olDesc(c.olKey); }));
@@ -498,7 +501,7 @@ async function addCandidates(cands, source, status){
   if(hasAI()){
     try{ rich = await enrichBooks(cands); }catch(e){ toast('Ajouté sans les infos de l\'IA : ' + e.message); }
   }
-  const added = rich.map(c => makeBook(c, source, status));
+  const added = rich.map(c => makeBook(c, source, status, extra));
   S.books.unshift(...added); save();
   return added;
 }
@@ -531,6 +534,11 @@ function render(){
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.val; el.focus(); try{ el.setSelectionRange(keep.pos, keep.pos); }catch(e){} } }
 }
 
+function toDateInput(t){ if(!t) return ''; const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function fromDateInput(v){ if(!v) return null; const [y,m,d] = v.split('-').map(Number); return new Date(y, m-1, d, 12).getTime(); }
+function addExtra(){ const e = {lang: SHEET && SHEET.lang != null ? SHEET.lang : (S.settings.lastLang || '')}; if(SHEET && SHEET.status === 'read' && SHEET.finDate) e.finishedAt = fromDateInput(SHEET.finDate); if(e.lang){ S.settings.lastLang = e.lang; saveLocal(); } return e; }
+const langSeg = () => `<div class="col" style="gap:8px"><span class="label">Langue de lecture</span><div class="seg">${[['fr','Français'],['en','Anglais'],['','Non précisé']].map(([k,l]) => `<button type="button" class="${(SHEET.lang ?? (S.settings.lastLang || 'fr'))===k?'on':''}" data-a="setLang" data-v="${k}">${l}</button>`).join('')}</div></div>`;
+const finDateField = () => SHEET.status === 'read' ? `<label class="col" style="gap:8px"><span class="label">Terminé le</span><input class="inp" type="date" data-change="finDate" value="${esc(SHEET.finDate || toDateInput(Date.now()))}" max="${toDateInput(Date.now())}"></label>` : '';
 const statusSeg = () => `<div class="col" style="gap:8px"><span class="label">Ajouter dans</span><div class="seg">${[['toread','À lire'],['reading','En cours'],['read','Lus']].map(([k,l]) => `<button type="button" class="${(SHEET.status||'toread')===k?'on':''}" data-a="setStatus" data-v="${k}">${l}</button>`).join('')}</div></div>`;
 const folderSVG = c => `<svg width="18" height="18" viewBox="0 0 24 24" fill="${c}" fill-opacity=".18" stroke="${c}" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
 function viewLib(){
@@ -542,11 +550,15 @@ function viewLib(){
   const present = GENRES.map(g => ({g, n:list.filter(b => b.genre === g).length})).filter(x => x.n);
   if(UI.libGenre && !present.some(x => x.g === UI.libGenre)) UI.libGenre = '';
   if(UI.libGenre) list = list.filter(b => b.genre === UI.libGenre);
+  const keysOf = b => (b.tags || []).map(norm).filter(Boolean).concat(b.lang ? ['@' + b.lang] : []);
+  const labelOf = {};
+  list.forEach(b => { (b.tags || []).forEach(t => { const k = norm(t); if(k && !labelOf[k]) labelOf[k] = String(t).trim(); }); if(b.lang) labelOf['@' + b.lang] = LANGS[b.lang]; });
+  UI.libTags = UI.libTags.filter(k => labelOf[k]);
+  if(UI.libTags.length) list = list.filter(b => { const ks = keysOf(b); return UI.libTags.every(k => ks.includes(k)); });
   const tagMap = {};
-  list.forEach(b => (b.tags || []).forEach(t => { const k = norm(t); if(!k) return; (tagMap[k] = tagMap[k] || {label:String(t).trim(), n:0}).n++; }));
-  const tags = Object.entries(tagMap).sort((a,b) => b[1].n - a[1].n || a[1].label.localeCompare(b[1].label));
-  if(UI.libTag && !tagMap[UI.libTag]) UI.libTag = '';
-  if(UI.libTag) list = list.filter(b => (b.tags || []).some(t => norm(t) === UI.libTag));
+  list.forEach(b => keysOf(b).forEach(k => { (tagMap[k] = tagMap[k] || {label:labelOf[k], n:0}).n++; }));
+  UI.libTags.forEach(k => { if(!tagMap[k]) tagMap[k] = {label:labelOf[k], n:0}; });
+  const tags = Object.entries(tagMap).sort((a,b) => (UI.libTags.includes(b[0]) - UI.libTags.includes(a[0])) || (b[0][0]==='@') - (a[0][0]==='@') || b[1].n - a[1].n || a[1].label.localeCompare(b[1].label));
   const bySeries = {};
   if(seg === 'read') list.forEach(b => { if(b.series){ const k = norm(b.series); (bySeries[k] = bySeries[k] || []).push(b); } });
   if(UI.libSeries && !(bySeries[UI.libSeries] && bySeries[UI.libSeries].length)) UI.libSeries = '';
@@ -555,7 +567,7 @@ function viewLib(){
     list = bySeries[UI.libSeries].slice().sort((a,b) => (a.tome||99) - (b.tome||99));
     seriesHead = `<div class="row" style="gap:10px"><button class="icon-btn" data-a="closeSeries" aria-label="Retour aux livres lus">${I.back}</button><div><h2>${esc(list[0].series)}</h2><p class="small">${plural(list.length,'livre')} ${list.length>1?'lus':'lu'}</p></div></div>`;
   }
-  const needBackup = S.books.length >= 3 && Date.now() - (S.lastBackup||0) > 30*86400000;
+  const needBackup = !S.settings.ghToken && S.books.length >= 3 && Date.now() - (S.lastBackup||0) > 30*86400000;
   let body;
   if(!S.books.length){
     body = `<div class="empty"><strong style="color:var(--ink);font-size:16px">Ta liste est vide</strong>Tape deux fois au dos de ton iPhone sur une vidéo Instagram, ou ajoute un livre avec le bouton +.<button class="btn" data-a="openAdd">${I.plus} Ajouter un livre</button></div>`;
@@ -592,6 +604,7 @@ function viewLib(){
   </div>
   ${needBackup ? `<div class="banner">Pense à sauvegarder ta liste de temps en temps.<button data-a="exportData">Sauvegarder</button></div>` : ''}
   ${!S.settings.apiKey && !S.settings.noAI ? `<div class="banner">Active l'IA gratuite (Gemini) pour les résumés, le spice et les recos.<button data-a="openSettings">Réglages</button></div>` : ''}
+  ${!UI.libSeries ? weeklyCard() : ''}
   <div class="seg" role="tablist">
     <button class="${seg==='reading'?'on':''}" data-a="seg" data-v="reading">En cours</button>
     <button class="${seg==='toread'?'on':''}" data-a="seg" data-v="toread">À lire</button>
@@ -602,7 +615,7 @@ function viewLib(){
       ${present.map(x => `<button class="folder ${UI.libGenre===x.g?'on':''}" data-a="libGenre" data-v="${esc(x.g)}">${folderSVG(GSTYLE[x.g].bar)}${esc(x.g)}<b>${x.n}</b></button>`).join('')}
     </div>` : ''}
   ${seriesHead}
-  ${tags.length && seg !== 'reading' && !UI.libSeries ? `<div class="col" style="gap:8px"><span class="label">Tags</span><div class="chips scroll">${UI.libTag ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer</button>` : ''}${tags.map(([k,t]) => `<button class="chip sm ${UI.libTag===k?'on':''}" data-a="libTag" data-v="${esc(k)}">${esc(t.label)} · ${t.n}</button>`).join('')}</div></div>` : ''}
+  ${tags.length && seg !== 'reading' && !UI.libSeries ? `<div class="col" style="gap:8px"><span class="label">Tags${UI.libTags.length > 1 ? ' · livres qui ont tous ces tags' : ''}</span><div class="chips scroll">${UI.libTags.length ? `<button class="chip sm" data-a="libTag" data-v="">${I.close} Effacer (${UI.libTags.length})</button>` : ''}${tags.map(([k,t]) => { const on = UI.libTags.includes(k); return `<button class="chip sm ${on?'on':''}" data-a="libTag" data-v="${esc(k)}" aria-pressed="${on}">${on ? I.check + ' ' : ''}${esc(t.label)}${on ? '' : ' · ' + t.n}</button>`; }).join('')}</div></div>` : ''}
   ${body}`;
 }
 
@@ -746,11 +759,18 @@ function viewStats(){
 /* ============ Feuilles ============ */
 function renderSheet(){
   const el = $('#sheet');
-  if(!SHEET){ el.innerHTML = ''; document.body.style.overflow = ''; return; }
+  if(!SHEET){ el.innerHTML = ''; el.dataset.key = ''; document.body.style.overflow = ''; return; }
   document.body.style.overflow = 'hidden';
-  if(SHEET.kind === 'detail'){ el.innerHTML = `<div class="full" role="dialog" aria-modal="true" aria-label="Fiche livre"><div class="full-inner">${sheetDetail()}</div></div>`; return; }
-  const inner = SHEET.kind==='add' ? sheetAdd() : SHEET.kind==='import' ? sheetImport() : sheetSettings();
-  el.innerHTML = `<div class="backdrop" data-a="close"></div><div class="pane" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
+  const old = el.querySelector('.full, .pane'), top = old ? old.scrollTop : 0;
+  const key = SHEET.kind + ':' + (SHEET.id || (SHEET.cand && SHEET.cand.title) || '');
+  const same = el.dataset.key === key;
+  if(SHEET.kind === 'detail') el.innerHTML = `<div class="full" role="dialog" aria-modal="true" aria-label="Fiche livre"><div class="full-inner">${sheetDetail()}</div></div>`;
+  else {
+    const inner = SHEET.kind==='add' ? sheetAdd() : SHEET.kind==='import' ? sheetImport() : sheetSettings();
+    el.innerHTML = `<div class="backdrop" data-a="close"></div><div class="pane" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
+  }
+  el.dataset.key = key;
+  if(same){ const now = el.querySelector('.full, .pane'); if(now) now.scrollTop = top; }
 }
 /* ============ Navigation « retour » (bouton Safari + glisser vers la droite) ============ */
 let NAV_SKIP = 0;
@@ -813,7 +833,9 @@ function sheetDetail(){
   return `
   <div class="dhead">
     <div class="row between" style="align-self:stretch"><button class="icon-btn white" data-a="close" aria-label="Retour">${I.back}</button>${owned ? '' : ''}</div>
-    ${coverHTML(b,'width:150px;height:225px;border-radius:8px;box-shadow:0 12px 30px rgba(60,20,10,.3);padding:14px')}
+    ${owned ? `<button data-a="pickCover" aria-label="Changer la couverture" style="border:none;background:none;padding:0">${coverHTML(b,'width:150px;height:225px;border-radius:8px;box-shadow:0 12px 30px rgba(60,20,10,.3);padding:14px')}</button>
+    <button class="btn line" style="height:34px;font-size:13px;background:#fff" data-a="pickCover">${I.image} Changer la couverture</button>` : coverHTML(b,'width:150px;height:225px;border-radius:8px;box-shadow:0 12px 30px rgba(60,20,10,.3);padding:14px')}
+    ${owned && SHEET.cover ? coverPicker(b) : ''}
   </div>
   <div class="dbody">
     <div class="col" style="gap:6px">
@@ -821,7 +843,7 @@ function sheetDetail(){
       <p style="font-size:16px;color:var(--ink2)">${esc(b.author)}</p>
       ${b.series ? `<p style="font-size:14px;color:var(--mute)">${esc(seriesLine(b))}</p>` : ''}
       ${(b.year || b.pages) ? `<p class="small">${[b.year, b.pages ? b.pages + ' pages' : ''].filter(Boolean).join(' · ')}</p>` : ''}
-      <div class="tags" style="margin-top:6px">${genreTag(b.genre)}${(b.tags||[]).map(t => owned ? `<button class="tag plain" style="border:none" data-a="seeTag" data-v="${esc(norm(t))}">${esc(t)}</button>` : `<span class="tag plain">${esc(t)}</span>`).join('')}</div>
+      <div class="tags" style="margin-top:6px">${genreTag(b.genre)}${b.lang ? `<span class="tag" style="background:#EEF2FF;color:#2F3FA8">${b.lang === 'fr' ? 'VF' : 'VO anglaise'}</span>` : ''}${(b.tags||[]).map(t => owned ? `<button class="tag plain" style="border:none" data-a="seeTag" data-v="${esc(norm(t))}">${esc(t)}</button>` : `<span class="tag plain">${esc(t)}</span>`).join('')}</div>
     </div>
     ${owned ? `
       <div class="seg">
@@ -829,6 +851,11 @@ function sheetDetail(){
         <button class="${st==='reading'?'on':''}" data-a="status" data-v="reading">En cours</button>
         <button class="${st==='read'?'on':''}" data-a="status" data-v="read">Lu</button>
       </div>
+      ${st !== 'toread' ? `<div class="row" style="gap:10px;align-items:flex-end">
+        <label class="col" style="gap:6px;flex:1;min-width:0"><span class="label">Commencé le</span><input class="inp" type="date" data-change="startedAt" value="${toDateInput(b.startedAt)}" max="${toDateInput(Date.now())}"></label>
+        ${st === 'read' ? `<label class="col" style="gap:6px;flex:1;min-width:0"><span class="label">Terminé le</span><input class="inp" type="date" data-change="finishedAt" value="${toDateInput(b.finishedAt)}" max="${toDateInput(Date.now())}"></label>` : ''}
+      </div>` : ''}
+      <div class="col" style="gap:8px"><span class="label">Langue de lecture</span><div class="seg">${[['fr','Français'],['en','Anglais']].map(([k,l]) => `<button class="${b.lang===k?'on':''}" data-a="setLang" data-v="${k}">${l}</button>`).join('')}</div></div>
       <div style="display:grid;grid-template-columns:${showSpice?'repeat(2,minmax(0,1fr))':'1fr'};gap:12px">
         <div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Ma note</span>${rateRow('rating', b.rating||0)}</div>
         ${showSpice ? `<div class="box" style="padding:12px 10px;gap:4px"><span class="label" style="padding-left:4px">Spice${b.spice==null && b.spiceEst!=null ? ' · estimé IA' : ''}</span>${rateRow('spice', b.spice ?? b.spiceEst ?? 0)}</div>` : ''}
@@ -844,7 +871,6 @@ function sheetDetail(){
           <div class="icon-btn" style="border-radius:10px;background:#E9E9EE">${src.type==='manuel' ? I.plus : src.type==='ia' ? I.tabMe : src.type==='recherche' ? I.search : I.insta}</div>
           <div class="col" style="gap:2px;flex:1"><span style="font-size:14px;font-weight:600">${src.type==='manuel' ? 'Ajout manuel' : src.type==='ia' ? 'Recommandation de l\'IA' : src.type==='recherche' ? 'Recherche' : 'Vidéo Instagram'}</span><span class="small">Ajouté le ${fmtDate(b.addedAt)}${src.type==='capture'||src.type==='instagram' ? ' · via capture' : ''}</span></div>
           ${src.url ? I.chev + '</a>' : '</div>'}
-        ${b.finishedAt ? `<p class="small">Terminé le ${fmtDate(b.finishedAt)}</p>` : b.startedAt ? `<p class="small">Commencé le ${fmtDate(b.startedAt)}</p>` : ''}
       </div>
       ${!b.enriched && hasAI() ? `<button class="btn line block" data-a="enrichOne" ${SHEET.busy?'disabled':''}>${SHEET.busy ? 'L\'IA complète la fiche…' : I.tabMe + ' Compléter avec l\'IA (résumé, genre, spice)'}</button>` : ''}
       <form class="col" style="gap:8px" data-form="series">
@@ -856,11 +882,50 @@ function sheetDetail(){
       </form>
       <div class="col" style="gap:8px"><label class="label" for="genreSel">Genre</label>
         <select id="genreSel" class="inp" data-change="genre">${GENRES.map(g => `<option ${g===b.genre?'selected':''}>${esc(g)}</option>`).join('')}</select></div>
-      ${SHEET.confirmDel ? `<div class="panel"><p style="font-size:14px">Supprimer « ${esc(b.title)} » de ta liste ?</p><div class="row"><button class="btn light" style="flex:1" data-a="cancelDel">Annuler</button><button class="btn" style="flex:1;background:#B42318" data-a="doDel">Supprimer</button></div></div>`
+      ${SHEET.confirmDel ? `<div class="panel" id="confirmDel"><p style="font-size:14px">Supprimer « ${esc(b.title)} » de ta liste ?</p><div class="row"><button class="btn light" style="flex:1" data-a="cancelDel">Annuler</button><button class="btn" style="flex:1;background:#B42318" data-a="doDel">Supprimer</button></div></div>`
         : `<button class="btn danger block" data-a="askDel">Supprimer de ma liste</button>`}` : ''}
   </div>`;
 }
 
+function langLabel(c){ c = String(c||'').toLowerCase(); return /^(fre|fra|fr)$/.test(c) ? 'FR' : /^(eng|en)$/.test(c) ? 'EN' : c ? c.slice(0,3).toUpperCase() : ''; }
+function coverPicker(b){
+  const C = SHEET.cover;
+  let grid = '';
+  if(C.loading) grid = `<div class="loading" style="background:#fff"><div class="spinner"></div>Recherche des éditions…</div>`;
+  else if(C.list && C.list.length) grid = `<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 10px">${C.list.map((c,i) => `<button data-a="setCover" data-v="${i}" style="border:none;padding:0;background:none;display:flex;flex-direction:column;gap:4px;min-width:0;color:var(--ink)" aria-label="Choisir cette couverture ${esc(c.label)}"><img src="${esc(c.url)}" alt="" loading="lazy" onload="if(this.naturalWidth<20)this.closest('button').remove()" onerror="this.closest('button').remove()" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,.15);background:#eee"><span style="font-size:10px;color:var(--mute);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.label)}</span></button>`).join('')}</div>`;
+  else if(C.list) grid = `<p class="small">Aucune autre édition trouvée. Importe une photo ou colle un lien.</p>`;
+  return `<div class="panel" style="align-self:stretch;background:#fff;gap:12px">
+    <div class="row between"><span class="label">Choisir une couverture</span><button class="icon-btn" style="width:36px;height:36px" data-a="closeCover" aria-label="Fermer">${I.close}</button></div>
+    ${grid}
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn line" style="flex:1;height:40px" data-a="uploadCover">${I.image} Importer une photo</button>${b.customCover ? `<button class="btn light" style="flex:1;height:40px" data-a="resetCover">Couverture automatique</button>` : ''}</div>
+    <form class="field" data-form="coverUrl" style="background:var(--soft)"><label class="sr" for="curl">Lien d'une image</label><input id="curl" type="url" placeholder="Ou colle le lien d'une image…" autocomplete="off"><button class="btn" style="height:36px;padding:0 14px">OK</button></form>
+  </div>`;
+}
+async function loadCovers(b){
+  const out = [], seen = new Set();
+  const add = (url, label) => { if(url && !seen.has(url)){ seen.add(url); out.push({url, label:label || ''}); } };
+  let key = b.olKey;
+  if(!key){ try{ const r = await olSearch(Object.assign({title:b.title, limit:5}, b.author ? {author:b.author.split(',')[0]} : {})); const m = r.find(x => similar(b.title, x.title)); if(m) key = m.olKey; }catch(e){} }
+  const jobs = [];
+  if(key) jobs.push(fetchJSON('https://openlibrary.org' + key + '/editions.json?limit=100', 15000).then(j => (j.entries || []).forEach(e => {
+    const id = (e.covers || []).find(x => x > 0); if(!id) return;
+    const lang = (e.languages || []).map(l => langLabel((l.key||'').split('/').pop())).filter(Boolean).join('/');
+    add('https://covers.openlibrary.org/b/id/' + id + '-M.jpg', [lang, (e.publishers || [])[0], (String(e.publish_date||'').match(/\d{4}/) || [''])[0]].filter(Boolean).join(' · '));
+  })).catch(() => {}));
+  jobs.push(gbSearch('intitle:"' + b.title + '"' + (b.author ? ' inauthor:"' + b.author.split(',')[0] + '"' : ''), 20).then(g => g.filter(x => x.thumb && similar(b.title, x.title)).forEach(x => add(x.thumb, [langLabel(x.lang), x.year].filter(Boolean).join(' · ') || 'Google'))).catch(() => {}));
+  await Promise.all(jobs);
+  const want = b.lang === 'fr' ? 'FR' : b.lang === 'en' ? 'EN' : '';
+  if(want) out.sort((a,c) => (c.label.startsWith(want)) - (a.label.startsWith(want)));
+  return out.slice(0, 48);
+}
+function imageToDataURL(file, maxW){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { const k = Math.min(1, (maxW||400) / img.naturalWidth); const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth*k); cv.height = Math.round(img.naturalHeight*k); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url); resolve(cv.toDataURL('image/jpeg', 0.82)); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image illisible.')); };
+    img.src = url;
+  });
+}
 function sheetAdd(){
   const A = SHEET;
   let res = '';
@@ -869,6 +934,8 @@ function sheetAdd(){
   else if(A.results) res = A.results.length ? `<div>${A.results.map((r,i) => resultRow(r,'add',i)).join('')}</div>` : `<div class="empty">Aucun résultat. Tu peux l'ajouter à la main ci-dessous.</div>`;
   return `${sheetHead('Ajouter un livre')}
   ${statusSeg()}
+  ${finDateField()}
+  ${langSeg()}
   <form class="field" data-form="addsearch">${I.search}<label class="sr" for="aq">Titre ou auteur</label><input id="aq" type="search" enterkeyhint="search" placeholder="Titre ou auteur…" value="${esc(A.q||'')}" autocomplete="off"></form>
   ${res}
   <button class="btn line block" data-a="pickShot">${I.image} Depuis une capture d'écran</button>
@@ -897,6 +964,8 @@ function sheetImport(){
         ${x.owned ? '' : `<span class="check ${x.checked?'on':''}">${x.checked ? I.check : ''}</span>`}
       </button>`).join('')}</div>
     ${statusSeg()}
+    ${finDateField()}
+    ${langSeg()}
     <p class="small" style="line-height:1.45">Un autre livre plus loin dans la vidéo ? Retourne sur Instagram et refais un double tap : il s'ajoutera à cette liste.</p>
     <button class="btn block" data-a="confirmImp" ${!n || M.busy ? 'disabled' : ''}>${M.busy ? '<div class="spinner" style="border-top-color:#fff;border-color:#555"></div> Préparation des fiches…' : 'Ajouter ' + plural(n, 'livre') + ' à lire'}</button>`;
 }
@@ -939,25 +1008,25 @@ function sheetSettings(){
 /* ============ Actions ============ */
 function candFrom(ref){
   const [list, i] = ref.split(':');
-  const arr = list==='res' ? UI.sResults : list==='pop' ? UI.pop : list==='aip' ? UI.aiPicks : list==='rec' ? S.recs : list==='add' ? (SHEET && SHEET.results) : null;
+  const arr = list==='week' ? (S.weekly && S.weekly.book ? [S.weekly.book] : []) : list==='res' ? UI.sResults : list==='pop' ? UI.pop : list==='aip' ? UI.aiPicks : list==='rec' ? S.recs : list==='add' ? (SHEET && SHEET.results) : null;
   return arr ? arr[Number(i)] : null;
 }
-async function addOne(cand, sourceType, status){
+async function addOne(cand, sourceType, status, extra){
   const src = {type:sourceType, date:Date.now()};
-  const added = await addCandidates([cand], src, status);
+  const added = await addCandidates([cand], src, status, extra);
   if(added.length) toast('« ' + added[0].title + ' » ajouté à ta liste');
   return added[0];
 }
 const A = {
   tab(v){ UI.tab = v; render(); window.scrollTo(0,0); },
-  seg(v){ if(UI.libSeries) navPop(); UI.seg = v; UI.libGenre = ''; UI.libTag = ''; UI.libSeries = ''; render(); },
+  seg(v){ if(UI.libSeries) navPop(); UI.seg = v; UI.libGenre = ''; UI.libTags = []; UI.libSeries = ''; render(); },
   openSeries(v){ UI.libSeries = v; render(); window.scrollTo(0,0); navPush(); },
   closeSeries(){ goBack(); },
-  libGenre(v){ UI.libGenre = UI.libGenre === v && v ? '' : v; UI.libTag = ''; render(); },
-  libTag(v){ UI.libTag = UI.libTag === v ? '' : v; render(); },
-  seeTag(v){ UI.tab = 'lib'; UI.libGenre = ''; UI.libTag = v; const b = currentBook(); if(b) UI.seg = b.status; closeSheet(); },
+  libGenre(v){ UI.libGenre = UI.libGenre === v && v ? '' : v; UI.libTags = []; render(); },
+  libTag(v){ if(!v) UI.libTags = []; else UI.libTags = UI.libTags.includes(v) ? UI.libTags.filter(k => k !== v) : UI.libTags.concat(v); render(); },
+  seeTag(v){ UI.tab = 'lib'; UI.libGenre = ''; UI.libTags = [v]; const b = currentBook(); if(b) UI.seg = b.status; closeSheet(); },
   open(v){ openSheet({kind:'detail', id:v}); },
-  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip'); openSheet({kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}); },
+  openCand(v){ const c = candFrom(v); if(!c) return; const fromRec = v.startsWith('rec') || v.startsWith('aip') || v.startsWith('week'); openSheet({kind:'detail', cand:c, ref:v, srcType: fromRec ? 'ia' : 'recherche'}); },
   close(){ if(SHEET && SHEET.kind === 'import' && SHEET.phase === 'pick'){ S.pending = null; saveLocal(); } closeSheet(); },
   async addCurrent(){
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
@@ -968,8 +1037,9 @@ const A = {
   async addCand(v, el){
     const c = candFrom(v); if(!c) return;
     el.disabled = true; el.innerHTML = '<div class="spinner"></div>';
-    const type = (v.startsWith('rec') || v.startsWith('aip')) ? 'ia' : 'recherche';
-    await addOne(c, type, v.startsWith('add') && SHEET ? SHEET.status : 'toread');
+    const type = (v.startsWith('rec') || v.startsWith('aip') || v.startsWith('week')) ? 'ia' : 'recherche';
+    const inAdd = v.startsWith('add') && SHEET;
+    await addOne(c, type, inAdd ? SHEET.status : 'toread', inAdd ? addExtra() : {lang:S.settings.lastLang || ''});
     if(v.startsWith('rec')){ S.recs.splice(Number(v.split(':')[1]), 1); save(); }
     if(SHEET && SHEET.kind === 'add') renderSheet();
     render();
@@ -985,10 +1055,23 @@ const A = {
   },
   rating(v){ const b = currentBook(); const n = Number(v); b.rating = b.rating === n ? 0 : n; touch(b); save(); renderSheet(); },
   spice(v){ const b = currentBook(); const n = Number(v); const cur = b.spice ?? b.spiceEst ?? 0; b.spice = (cur === n && b.spice != null) ? n - 1 : n; touch(b); save(); renderSheet(); },
-  askDel(){ SHEET.confirmDel = true; renderSheet(); },
+  askDel(){ SHEET.confirmDel = true; renderSheet(); const p = document.getElementById('confirmDel'); if(p) p.scrollIntoView({block:'center', behavior:'smooth'}); },
   cancelDel(){ SHEET.confirmDel = false; renderSheet(); },
   doDel(){ S.deleted = S.deleted || {}; S.deleted[SHEET.id] = Date.now(); S.books = S.books.filter(b => b.id !== SHEET.id); save(); closeSheet(); toast('Livre supprimé'); },
   openAdd(){ openSheet({kind:'add', q:'', results:null, status: UI.tab === 'lib' ? UI.seg : 'toread'}); },
+  async pickCover(){
+    const b = currentBook(); if(!b) return;
+    SHEET.cover = {loading:true, list:null}; renderSheet();
+    const list = await loadCovers(b);
+    if(SHEET && SHEET.cover){ SHEET.cover = {loading:false, list}; renderSheet(); }
+  },
+  closeCover(){ SHEET.cover = null; renderSheet(); },
+  setCover(v){ const b = currentBook(); const c = SHEET.cover && SHEET.cover.list && SHEET.cover.list[Number(v)]; if(b && c){ b.customCover = c.url; touch(b); save(); SHEET.cover = null; renderSheet(); render(); toast('Couverture changée'); } },
+  resetCover(){ const b = currentBook(); if(b){ delete b.customCover; touch(b); save(); SHEET.cover = null; renderSheet(); render(); toast('Couverture automatique remise'); } },
+  uploadCover(){ const f = $('#fileCover'); f.value = ''; f.click(); },
+  weeklyNext(){ loadWeekly(true); },
+  weeklyHide(){ if(S.weekly){ S.weekly.hidden = true; saveLocal(); render(); toast('Masqué jusqu\'à la semaine prochaine'); } },
+  setLang(v){ if(SHEET.kind === 'detail'){ const b = currentBook(); if(b){ b.lang = b.lang === v ? '' : v; touch(b); save(); renderSheet(); } return; } SHEET.lang = v; if(SHEET.kind === 'import' && S.pending){ S.pending.lang = v; saveLocal(); } renderSheet(); },
   setStatus(v){ SHEET.status = v; if(SHEET.kind === 'import' && S.pending){ S.pending.status = v; saveLocal(); } renderSheet(); },
   openSettings(){ openSheet({kind:'settings', nokey: !S.settings.apiKey}); },
   pickShot(){ NEXT_STATUS = SHEET && SHEET.status || NEXT_STATUS; const f = $('#fileShot'); f.value = ''; f.click(); },
@@ -1003,9 +1086,9 @@ const A = {
     if(SHEET.busy) return; SHEET.busy = true; renderSheet();
     const picks = SHEET.items.filter(x => x.checked).map(x => x.cand);
     const st = SHEET.status || 'toread';
-    const added = await addCandidates(picks, SHEET.source, st);
+    const added = await addCandidates(picks, SHEET.source, st, addExtra());
     S.pending = null; save();
-    closeSheet(); UI.tab = 'lib'; UI.seg = st; UI.libGenre = ''; UI.libTag = ''; UI.libSeries = ''; render();
+    closeSheet(); UI.tab = 'lib'; UI.seg = st; UI.libGenre = ''; UI.libTags = []; UI.libSeries = ''; render();
     if(added.length) toast(plural(added.length, 'livre') + ' ' + (added.length>1?'ajoutés':'ajouté') + ' à ta liste');
   },
   exportData(){
@@ -1050,6 +1133,8 @@ document.addEventListener('change', e => {
   const k = el.dataset.change;
   if(k === 'sSpice'){ UI.sSpice = el.value; loadAIPicks(false); }
   if(k === 'year'){ UI.year = Number(el.value); render(); }
+  if(k === 'finDate'){ SHEET.finDate = el.value; }
+  if(k === 'startedAt' || k === 'finishedAt'){ const b = currentBook(); if(b){ b[k] = fromDateInput(el.value); touch(b); save(); render(); toast('Date enregistrée'); } }
   if(k === 'genre'){ const b = currentBook(); if(b){ b.genre = el.value; touch(b); save(); renderSheet(); } }
 });
 document.addEventListener('submit', e => {
@@ -1057,6 +1142,7 @@ document.addEventListener('submit', e => {
   const k = f.dataset.form;
   if(k === 'search'){ UI.q = $('#q').value.trim(); $('#q').blur(); if(UI.q) runSearch(); else if(UI.sGenre) loadGenre(); else { UI.sResults = null; render(); } }
   if(k === 'ask'){ const v = $('#ask').value.trim(); if(v) recommend(v); }
+  if(k === 'coverUrl'){ const v = $('#curl').value.trim(); const b = currentBook(); if(b && /^https?:\/\//.test(v)){ b.customCover = v.replace(/^http:/, 'https:'); touch(b); save(); SHEET.cover = null; renderSheet(); render(); toast('Couverture changée'); } else toast('Colle un lien qui commence par https://'); }
   if(k === 'series'){ const b = currentBook(); if(b){ const v = $('#serIn').value.trim(); const ex = S.books.find(x => x !== b && x.series && norm(x.series) === norm(v)); b.series = ex ? ex.series : v; b.tome = Number($('#tomeIn').value) || null; touch(b); save(); renderSheet(); render(); toast(b.series ? 'Rangé dans la série « ' + b.series + ' »' : 'Série retirée'); } }
   if(k === 'addsearch'){ addSearch($('#aq').value.trim()); }
   if(k === 'manual'){ manualAdd($('#mt').value.trim(), $('#ma').value.trim()); }
@@ -1074,6 +1160,11 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape' && SHEET) clos
 $('#fileShot').addEventListener('change', async e => {
   const file = e.target.files && e.target.files[0]; if(!file) return;
   try{ const image = await fileToImage(file); startImport({image}); }catch(err){ toast(err.message); }
+});
+$('#fileCover').addEventListener('change', async e => {
+  const file = e.target.files && e.target.files[0]; if(!file) return;
+  const b = SHEET && SHEET.kind === 'detail' && currentBook(); if(!b) return;
+  try{ b.customCover = await imageToDataURL(file, 420); touch(b); save(); SHEET.cover = null; renderSheet(); render(); toast('Couverture changée'); }catch(err){ toast(err.message); }
 });
 $('#fileBackup').addEventListener('change', async e => {
   const file = e.target.files && e.target.files[0]; if(!file) return;
@@ -1152,6 +1243,70 @@ async function loadAIPicks(force){
   }catch(e){ if(req === AI_REQ) UI.aiError = e.blocked ? 'Gemini gratuit n\'est pas disponible depuis ton pays.' : e.message; }
   if(req === AI_REQ){ UI.aiLoading = false; if(UI.tab === 'search') render(); }
 }
+/* ============ Livre de la semaine (thème selon la saison) ============ */
+function isoWeek(d){ const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day); const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1)); return t.getUTCFullYear() + '-S' + String(Math.ceil(((t - y0) / 86400000 + 1) / 7)).padStart(2,'0'); }
+function easter(y){ const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1; return new Date(y, mo-1, da); }
+function season(d){
+  const md = (d.getMonth()+1)*100 + d.getDate();
+  const diffE = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - easter(d.getFullYear())) / 86400000);
+  if(md >= 1010 && md <= 1031) return {key:'halloween', label:'Halloween', hint:'Halloween : frissons, sorcières, vampires, ambiance gothique ou dark romance, fantômes', ol:'subject:witches OR subject:vampires OR subject:"haunted houses"'};
+  if(md >= 1201 && md <= 1231) return {key:'noel', label:'Noël', hint:'Noël : ambiance hivernale et festive, cosy, magie de Noël, romance sous la neige', ol:'subject:christmas'};
+  if(md >= 101 && md <= 107) return {key:'nouvelan', label:'Nouvelle année', hint:'nouvelle année : un nouveau départ, une histoire de renouveau qui donne de l\'élan', ol:'subject:"new beginnings" OR subject:"self-realization"'};
+  if(md >= 201 && md <= 214) return {key:'valentin', label:'Saint-Valentin', hint:'Saint-Valentin : une grande histoire d\'amour, romance qui fait battre le cœur', ol:'subject:"love stories"'};
+  if(diffE >= -10 && diffE <= 3) return {key:'paques', label:'Pâques', hint:'Pâques et printemps : légèreté, renouveau, nature qui renaît, histoire lumineuse', ol:'subject:spring OR subject:gardens'};
+  if(md >= 701 && md <= 831) return {key:'ete', label:'Été', hint:'été et vacances : lecture de plage, histoire solaire et addictive, voyage', ol:'subject:summer OR subject:"beach"'};
+  if(md >= 901 && md <= 930) return {key:'rentree', label:'Rentrée', hint:'rentrée : dark academia, école de magie, campus, université', ol:'subject:"boarding schools" OR subject:"dark academia"'};
+  if(md >= 1001 && md <= 1130) return {key:'automne', label:'Automne cosy', hint:'automne : ambiance cosy, feuilles mortes, plaid et thé, histoire réconfortante ou mystérieuse', ol:'subject:autumn OR subject:"cozy mystery"'};
+  if(md >= 108 && md <= 315) return {key:'hiver', label:'Hiver cocooning', hint:'hiver : cocooning, paysages de neige, histoire enveloppante', ol:'subject:winter'};
+  return {key:'printemps', label:'Printemps', hint:'printemps : histoire fraîche et pétillante, renouveau', ol:'subject:spring'};
+}
+let WEEK_LOADING = false;
+async function loadWeekly(force){
+  const now = new Date(), wk = isoWeek(now), th = season(now);
+  if(WEEK_LOADING) return;
+  if(!force && S.weekly && S.weekly.week === wk && (S.weekly.book || S.weekly.hidden)) return;
+  WEEK_LOADING = true; if(UI.tab === 'lib') render();
+  const prev = S.weekly && S.weekly.week === wk ? (S.weekly.seen || []) : [];
+  try{
+    let book = null;
+    if(hasAI()){
+      const lib = S.books.filter(b => b.rating > 0).map(b => b.title + ' (' + b.genre + ', ' + b.rating + '/5' + (b.spice != null ? ', spice ' + b.spice : '') + ')');
+      const system = 'Tu es la libraire personnelle d\'une lectrice française. Genres : ' + GENRES.join(', ') + '. Définitions : ' + GENRE_DEF + ' Choisis UN livre publié (pas d\'invention), disponible en français ou en anglais, titre français s\'il existe, tome 1 pour une série. Réponds uniquement en JSON : {"title":"","author":"","genre":"","why":"","spice":null}. "why" : 1 à 2 phrases chaleureuses en français qui relient le livre au thème de la semaine et à ses goûts. "spice" de 0 à 5 pour Romance et Romantasy, sinon null.';
+      const text = 'Thème de la semaine : ' + th.hint + '.\n' + (lib.length ? 'Ses livres notés : ' + lib.slice(0,80).join(' ; ') + '.\n' : 'Elle n\'a encore rien noté : choisis une valeur sûre, très appréciée.\n') +
+        'Ne propose aucun de ceux-ci : ' + S.books.map(b => b.title).concat(S.dislikes || [], prev).slice(0,250).join(' ; ') + '.';
+      try{
+        const r = parseJSON(await ai({system, text}));
+        if(r && r.title && !findOwned(r.title)) book = Object.assign(await lookup(r.title, r.author), {genre: GENRES.includes(r.genre) ? r.genre : '', why:r.why || '', spiceEst: typeof r.spice === 'number' ? r.spice : null});
+      }catch(e){ if(!e.busy && !e.blocked) throw e; }
+    }
+    if(!book){
+      const res = await olSearch({q:th.ol, sort:'readinglog', limit:40}).catch(() => []);
+      const pick = res.filter(r => r.thumb && !findOwned(r.title) && !prev.includes(r.title));
+      const r = pick[(Math.abs([...wk].reduce((h,c) => h*31 + c.charCodeAt(0), 7)) + prev.length) % Math.max(1, Math.min(pick.length, 12))];
+      if(r) book = Object.assign(r, {genre:guessGenre(r), why:'Un livre très lu pour l\'ambiance ' + th.label.toLowerCase() + '.', spiceEst:null});
+    }
+    S.weekly = {week:wk, theme:th.label, book, seen:prev.concat(book ? [book.title] : []), hidden:false};
+    saveLocal();
+  }catch(e){ S.weekly = {week:wk, theme:th.label, book:null, error:e.message, seen:prev, hidden:false}; }
+  WEEK_LOADING = false; if(UI.tab === 'lib') render();
+}
+function weeklyCard(){
+  const W = S.weekly, th = season(new Date());
+  if(W && W.week === isoWeek(new Date()) && W.hidden) return '';
+  if(WEEK_LOADING && !(W && W.book && W.week === isoWeek(new Date()))) return `<div class="loading" style="background:#F7F9FF;border:1px solid #D9E2FF"><div class="spinner"></div>Je choisis ton livre de la semaine · ${esc(th.label)}…</div>`;
+  if(!W || !W.book || W.week !== isoWeek(new Date())) return '';
+  const b = W.book, owned = findOwned(b.title);
+  return `<div class="hero" style="gap:12px;padding:16px">
+    <div class="row between"><span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#B9C6FF">Livre de la semaine · ${esc(W.theme)}</span>
+      <div class="row" style="gap:6px"><button class="icon-btn" style="width:34px;height:34px;background:transparent;border:1px solid #3A3A42;color:#fff" data-a="weeklyNext" aria-label="Proposer un autre livre">${I.refresh}</button><button class="icon-btn" style="width:34px;height:34px;background:transparent;border:1px solid #3A3A42;color:#fff" data-a="weeklyHide" aria-label="Masquer pour cette semaine">${I.close}</button></div></div>
+    <button data-a="openCand" data-v="week:0" style="display:flex;gap:14px;border:none;background:none;padding:0;text-align:left;color:#fff">
+      ${coverHTML(b,'width:64px;height:96px;box-shadow:0 6px 16px rgba(0,0,0,.4)')}
+      <div class="col" style="gap:5px;min-width:0"><span style="font-size:17px;font-weight:700;line-height:1.2">${esc(b.title)}</span><span style="font-size:13px;color:#C9C9D1">${esc(b.author)}</span>${b.genre ? `<span>${genreTag(b.genre)}</span>` : ''}</div>
+    </button>
+    ${b.why ? `<p class="why" style="font-size:13px">${esc(b.why)}</p>` : ''}
+    ${owned ? `<span style="font-size:13px;color:#C9C9D1">${I.check} Dans ta liste</span>` : `<button class="btn" style="background:#fff;color:var(--ink);height:42px" data-a="addCand" data-v="week:0">${I.plus} Ajouter à ma liste</button>`}
+  </div>`;
+}
 async function recommendNoAI(){
   const pool = S.books.filter(b => b.rating >= 4).sort((a,b) => b.rating - a.rating);
   const base = (pool.length ? pool : S.books).slice(0,5);
@@ -1202,7 +1357,7 @@ async function manualAdd(title, author){
   if(!title) return;
   SHEET.busy = true; renderSheet();
   const c = await lookup(title, author);
-  const b = await addOne(c, 'manuel', SHEET.status);
+  const b = await addOne(c, 'manuel', SHEET.status, addExtra());
   if(b){ SHEET = {kind:'detail', id:b.id}; renderSheet(); render(); } else closeSheet();
 }
 async function extractNoAI(text){
@@ -1226,7 +1381,8 @@ async function startImport(input){
   const keepStatus = (S.pending && Date.now() - S.pending.at < 20*60000 && S.pending.status) || (input.image ? NEXT_STATUS : 'toread');
   NEXT_STATUS = 'toread';
   if(!SHEET) navPush();
-  SHEET = {kind:'import', status:keepStatus, phase:'loading', msg: hasAI() ? 'L\'IA lit ta capture…' : 'Lecture de la capture…', items:[], source:{type:input.image ? 'capture' : 'instagram', url:input.url||'', date:Date.now()}};
+  const keepLang = S.pending && Date.now() - S.pending.at < 20*60000 && S.pending.lang != null ? S.pending.lang : undefined;
+  SHEET = {kind:'import', status:keepStatus, lang:keepLang, phase:'loading', msg: hasAI() ? 'L\'IA lit ta capture…' : 'Lecture de la capture…', items:[], source:{type:input.image ? 'capture' : 'instagram', url:input.url||'', date:Date.now()}};
   renderSheet();
   try{
     if(!input.text && !input.image) throw new Error('La capture n\'a pas pu être lue. Choisis-la dans Photos ci-dessous.');
@@ -1280,6 +1436,7 @@ function handleLaunch(){
 render();
 handleLaunch();
 if(S.settings.ghToken) setTimeout(() => syncNow(false), 800);
+setTimeout(() => loadWeekly(false), 1500);
 </script>
 </body>
 </html>
